@@ -1,13 +1,13 @@
-name: Build and Release Plugin
+name: Build, Release, and Update JSON
 
 on:
   push:
     tags:
-      - "v*" # Trigger only for version tags (e.g., v1.0.0)
+      - "v*"
 
 jobs:
   build:
-    name: Build Plugin ZIP
+    name: Build Plugin ZIP and Update Version JSON
     runs-on: ubuntu-latest
 
     steps:
@@ -15,13 +15,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # Setup PHP for linting (optional but recommended for WordPress plugins)
+      # Setup PHP for linting (optional)
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.0"
 
-      # Validate PHP code (optional, helps catch errors)
+      # Run PHP linter (optional)
       - name: Run PHP Linter
         run: |
           php -l wheelpros-hts/*.php
@@ -41,3 +41,30 @@ jobs:
           files: wheelpros-hts-v${{ github.ref_name }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Generate version JSON
+      - name: Generate Version JSON
+        run: |
+          VERSION=${{ github.ref_name }}
+          cat <<EOF > version.json
+          {
+            "name": "WheelPros Integration for HTS",
+            "slug": "wheelpros-hts",
+            "version": "${VERSION#v}",
+            "download_url": "https://github.com/${{ github.repository }}/releases/download/${VERSION}/wheelpros-hts-${VERSION}.zip",
+            "requires": "5.0",
+            "tested": "6.3",
+            "requires_php": "7.4"
+          }
+          EOF
+
+      # Commit and push version JSON to a branch
+      - name: Commit Version JSON
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git checkout -B version-file
+          mv version.json ./version.json
+          git add version.json
+          git commit -m "Update version.json for ${VERSION}"
+          git push origin version-file --force
