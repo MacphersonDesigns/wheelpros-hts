@@ -25,6 +25,9 @@ jobs:
       - name: Run PHP Linter
         run: |
           php -l wheelpros-hts/*.php
+          php -l wheelpros-hts/core/*.php
+          php -l wheelpros-hts/admin/*.php
+          php -l wheelpros-hts/api/*.php
 
       # Create the ZIP file
       - name: Create ZIP
