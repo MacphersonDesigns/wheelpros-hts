@@ -1,0 +1,43 @@
+name: Build and Release Plugin
+
+on:
+  push:
+    tags:
+      - "v*" # Trigger only for version tags (e.g., v1.0.0)
+
+jobs:
+  build:
+    name: Build Plugin ZIP
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Setup PHP for linting (optional but recommended for WordPress plugins)
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.0"
+
+      # Validate PHP code (optional, helps catch errors)
+      - name: Run PHP Linter
+        run: |
+          php -l wheelpros-hts/*.php
+          php -l wheelpros-hts/core/*.php
+          php -l wheelpros-hts/admin/*.php
+          php -l wheelpros-hts/api/*.php
+
+      # Create the ZIP file
+      - name: Create ZIP
+        run: |
+          zip -r wheelpros-hts-v${{ github.ref_name }}.zip wheelpros-hts -x "*.git*" -x "*.github*" -x "node_modules/*" -x "*.log"
+
+      # Upload the ZIP file as a release asset
+      - name: Publish Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: wheelpros-hts-v${{ github.ref_name }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

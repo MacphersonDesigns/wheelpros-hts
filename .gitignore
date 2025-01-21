@@ -1,0 +1,34 @@
+# WordPress Core Files
+wp-content/
+wp-config.php
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# IDE Files
+.idea/
+.vscode/
+
+# Log Files
+*.log
+
+# Composer and Node Dependencies
+/vendor/
+node_modules/
+
+# Environment Files
+.env
+.env.local
+
+# Build Files
+/build/
+dist/
+
+# Backup Files
+*.bak
+*.swp
+
+# Ignore compiled CSS and JS (optional if using a build process)
+assets/css/*.css
+assets/js/*.js.map
