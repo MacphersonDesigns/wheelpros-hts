@@ -1,0 +1,9 @@
+{
+	"name": "WheelPros Integration for HTS",
+	"slug": "wheelpros-hts",
+	"version": "0.0.1",
+	"download_url": "https://github.com/MacphersonDesigns/wheelpros-hts/releases/download/v0.0.1/wheelpros-hts-v0.0.1.zip",
+	"requires": "5.0",
+	"tested": "6.3",
+	"requires_php": "7.4"
+}
