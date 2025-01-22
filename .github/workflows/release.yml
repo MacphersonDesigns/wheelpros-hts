@@ -39,7 +39,7 @@ jobs:
       # Create the ZIP file
       - name: Create ZIP
         run: |
-          zip -r wheelpros-hts-${{ github.ref_name }}.zip . -x "*.git*" -x ".github*" -x "node_modules/*" -x "*.log"
+          zip -r wheelpros-hts-${{ github.ref_name }}.zip . -x "*.git*" -x ".github*" -x "node_modules/*" -x "*.log" -x "tests/*" -x "*.md"
 
       # Upload the ZIP file as a release asset
       - name: Publish Release
