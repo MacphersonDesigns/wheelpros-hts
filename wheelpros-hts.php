@@ -3,7 +3,7 @@
  * Plugin Name:       WheelPros Integration for HTS
  * Plugin URI:        https://www.indakmedia.com
  * Description:       Integration with WheelPros APIs for vehicle/product search and inventory display.
- * Version:           0.0.14
+ * Version:           0.0.21
  * Author:            Alex Macpherson
  * Author URI:        https://www.indakmedia.com
  * License:           GPL-2.0+
@@ -18,7 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define constants for the plugin.
-define( 'WHEELPROS_HTS_VERSION', '0.0.0' );
+define( 'WHEELPROS_HTS_VERSION', '0.0.21' );
 define( 'WHEELPROS_HTS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WHEELPROS_HTS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'WHEELPROS_HTS_TEXT_DOMAIN', 'wheelpros-hts' );
@@ -42,6 +42,14 @@ use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
 // Initialize the update checker.
 $updateChecker = PucFactory::buildUpdateChecker(
     'https://macphersondesigns.github.io/wheelpros-hts/version.json', // URL to the version info JSON file.
-    __FILE__,                                // Path to the plugin's main file.
-    'wheelpros-hts'                          // Plugin slug.
+    __DIR__ . '/wheelpros-hts.php',                 // Path to the plugin's main file.
+'wheelpros-hts'                                     // Plugin slug.
 );
+
+
+add_action('init', function() use ($updateChecker) {
+    $updateChecker->addResultFilter(function($info, $httpResponse) {
+        error_log('Update Checker Response: ' . print_r($info, true));
+        return $info;
+    });
+});
