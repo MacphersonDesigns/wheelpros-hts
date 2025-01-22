@@ -57,7 +57,7 @@ jobs:
             "name": "WheelPros Integration for HTS",
             "slug": "wheelpros-hts",
             "version": "${VERSION#v}",
-            "download_url": "https://github.com/${{ github.repository }}/releases/download/${VERSION}/wheelpros-hts-${VERSION}.zip",
+            "download_url": "https://github.com/${{ github.repository }}/releases/download/${VERSION}/wheelpros-hts.zip",
             "requires": "5.0",
             "tested": "6.3",
             "requires_php": "7.4"
