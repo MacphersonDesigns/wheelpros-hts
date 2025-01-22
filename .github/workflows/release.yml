@@ -46,8 +46,8 @@ jobs:
         run: |
           cp wheelpros-hts-${{ github.ref_name }}.zip wheelpros-hts-latest.zip
 
-      # Upload the ZIP file as a release asset
-      - name: Publish Release
+      # Upload the ZIP file with the version tag as a release asset
+      - name: Publish Release with Version Tag
         uses: softprops/action-gh-release@v1
         with:
           files: wheelpros-hts-${{ github.ref_name }}.zip
@@ -55,11 +55,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.INDAK_HTS }}
 
       # Upload the consistent ZIP file for updates
-      - name: Upload Latest ZIP
-        uses: actions/upload-artifact@v3
+      - name: Publish Latest ZIP
+        uses: softprops/action-gh-release@v1
         with:
-          name: wheelpros-hts-latest.zip
-          path: wheelpros-hts-latest.zip
+          files: wheelpros-hts-latest.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.INDAK_HTS }}
 
       - name: Generate Version JSON
         run: |
