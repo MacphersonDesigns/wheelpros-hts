@@ -36,10 +36,15 @@ jobs:
           php -l admin/*.php || true
           php -l api/*.php || true
 
-      # Create the ZIP file
+      # Create the ZIP file with the version tag
       - name: Create ZIP
         run: |
           zip -r wheelpros-hts-${{ github.ref_name }}.zip . -x "*.git*" -x ".github*" -x "node_modules/*" -x "*.log" -x "tests/*" -x "*.md"
+
+      # Duplicate/rename the ZIP file to have a consistent filename
+      - name: Duplicate ZIP
+        run: |
+          cp wheelpros-hts-${{ github.ref_name }}.zip wheelpros-hts-latest.zip
 
       # Upload the ZIP file as a release asset
       - name: Publish Release
@@ -48,6 +53,13 @@ jobs:
           files: wheelpros-hts-${{ github.ref_name }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.INDAK_HTS }}
+
+      # Upload the consistent ZIP file for updates
+      - name: Upload Latest ZIP
+        uses: actions/upload-artifact@v2
+        with:
+          name: wheelpros-hts-latest.zip
+          path: wheelpros-hts-latest.zip
 
       - name: Generate Version JSON
         run: |
