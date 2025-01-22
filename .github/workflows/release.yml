@@ -56,7 +56,7 @@ jobs:
 
       # Upload the consistent ZIP file for updates
       - name: Upload Latest ZIP
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: wheelpros-hts-latest.zip
           path: wheelpros-hts-latest.zip
