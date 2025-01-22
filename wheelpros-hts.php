@@ -42,8 +42,8 @@ use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
 // Initialize the update checker.
 $updateChecker = PucFactory::buildUpdateChecker(
     'https://macphersondesigns.github.io/wheelpros-hts/version.json', // URL to the version info JSON file.
-    __DIR__ . '/wheelpros-hts.php',                 // Path to the plugin's main file.
-'wheelpros-hts'                                     // Plugin slug.
+    __FILE__,               // Path to the plugin's main file.
+    'wheelpros-hts'        // Plugin slug.
 );
 
 
