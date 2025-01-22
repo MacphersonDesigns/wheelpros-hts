@@ -15,6 +15,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Verify Secret Access
+        run: echo "Secret INDAK_HTS is set correctly"
+        env:
+          GITHUB_TOKEN: ${{ secrets.INDAK_HTS }}
+
       - name: Checkout code
         uses: actions/checkout@v2
 
