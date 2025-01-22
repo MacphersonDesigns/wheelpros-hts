@@ -9,7 +9,6 @@ permissions:
   contents: write
   packages: write
   issues: write
-  metadata: read
 
 jobs:
   build:
