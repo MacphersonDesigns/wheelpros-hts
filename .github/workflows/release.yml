@@ -22,10 +22,10 @@ jobs:
 
       - name: Validate PHP
         run: |
-          php -l wheelpros-hts/*.php || true
-          php -l wheelpros-hts/core/*.php || true
-          php -l wheelpros-hts/admin/*.php || true
-          php -l wheelpros-hts/api/*.php || true
+          php -l *.php || true
+          php -l core/*.php || true
+          php -l admin/*.php || true
+          php -l api/*.php || true
 
       # Create the ZIP file
       - name: Create ZIP
