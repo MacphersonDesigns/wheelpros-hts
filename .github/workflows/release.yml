@@ -73,7 +73,7 @@ jobs:
             "download_url": "https://github.com/${{ github.repository }}/releases/download/${VERSION}/wheelpros-hts-${VERSION#v}.zip",
             "requires": "5.0",
             "tested": "6.7.1",
-            "requires_php": "7.4"
+            "requires_php": "7.4",
             "sections" : {
               "description" : "Plugin description here. You can use HTML."
             }
