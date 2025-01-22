@@ -30,16 +30,15 @@ jobs:
       # Create the ZIP file
       - name: Create ZIP
         run: |
-          zip -r wheelpros-hts-v${{ github.ref_name }}.zip wheelpros-hts -x "*.git*" -x "*.github*" -x "node_modules/*" -x "*.log"
+          zip -r wheelpros-hts-${{ github.ref_name }}.zip wheelpros-hts -x "*.git*" -x "*.github*" -x "node_modules/*" -x "*.log"
 
       # Upload the ZIP file as a release asset
       - name: Publish Release
         uses: softprops/action-gh-release@v1
         with:
-          files: wheelpros-hts-v${{ github.ref_name }}.zip
+          files: wheelpros-hts-${{ github.ref_name }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 
       - name: Generate Version JSON
         run: |
