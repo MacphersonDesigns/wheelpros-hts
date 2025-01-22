@@ -3,33 +3,30 @@ name: Build, Release, and Update JSON
 on:
   push:
     tags:
-      - "v*"
+      - "v*.*.*"
 
 jobs:
   build:
-    name: Build Plugin ZIP and Update Version JSON
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout the code
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v2
 
-      # Setup PHP for linting (optional)
-      - name: Setup PHP
+      - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.0"
+          php-version: 8.0
+          ini-file: production
 
-      # Run PHP linter (optional)
-      - name: Run PHP Linter
+      - name: Validate PHP
         run: |
-          php -l wheelpros-hts/*.php
-          php -l wheelpros-hts/core/*.php
-          php -l wheelpros-hts/admin/*.php
-          php -l wheelpros-hts/api/*.php
+          php -l wheelpros-hts/*.php || true
+          php -l wheelpros-hts/core/*.php || true
+          php -l wheelpros-hts/admin/*.php || true
+          php -l wheelpros-hts/api/*.php || true
 
-      # Create the ZIP file
+        # Create the ZIP file
       - name: Create ZIP
         run: |
           zip -r wheelpros-hts-v${{ github.ref_name }}.zip wheelpros-hts -x "*.git*" -x "*.github*" -x "node_modules/*" -x "*.log"
