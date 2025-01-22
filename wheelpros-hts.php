@@ -35,3 +35,13 @@ spl_autoload_register(function ($class) {
 
 // Include core plugin files.
 require_once WHEELPROS_HTS_PLUGIN_DIR . 'core/plugin-init.php';
+require_once plugin_dir_path(__FILE__) . 'lib/plugin-update-checker/plugin-update-checker.php';
+
+use YahnisElsts\PluginUpdateChecker\v4\PucFactory;
+
+// Initialize the update checker.
+$updateChecker = PucFactory::buildUpdateChecker(
+    'https://your-hosted-version-file.json', // URL to the version info JSON file.
+    __FILE__,                                // Path to the plugin's main file.
+    'wheelpros-hts'                          // Plugin slug.
+);

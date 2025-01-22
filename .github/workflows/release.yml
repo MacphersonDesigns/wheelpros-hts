@@ -15,6 +15,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+
+      # Setup PHP for linting (optional)
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.0"
+
+      # Run PHP linter (optional)
+      - name: Run PHP Linter
+        run: |
+          php -l wheelpros-hts/*.php
+          php -l wheelpros-hts/core/*.php
+          php -l wheelpros-hts/admin/*.php
+          php -l wheelpros-hts/api/*.php
+
+
       # Create the ZIP file
       - name: Create ZIP
         run: |
@@ -28,7 +44,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Generate the version.json file
+
       - name: Generate Version JSON
         run: |
           VERSION=${{ github.ref_name }}
