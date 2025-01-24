@@ -8,18 +8,12 @@ on:
 permissions:
   contents: write
   packages: write
-  issues: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Verify Secret Access
-        run: echo "Secret INDAK_HTS is set correctly"
-        env:
-          GITHUB_TOKEN: ${{ secrets.INDAK_HTS }}
-
       - name: Checkout code
         uses: actions/checkout@v2
 
@@ -29,63 +23,63 @@ jobs:
           php-version: 8.0
           ini-file: production
 
-      - name: Validate PHP
+      - name: Extract version from tag
+        id: version
         run: |
-          php -l *.php || true
-          php -l core/*.php || true
-          php -l admin/*.php || true
-          php -l api/*.php || true
+          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
+      - name: Update Version in PHP File
+        run: |
+          sed -i "s/^.*Version:.*$/ * Version:           ${{ env.VERSION }}/" wheelpros-hts.php
+          sed -i "s/define( 'WHEELPROS_HTS_VERSION'.*/define( 'WHEELPROS_HTS_VERSION', '${{ env.VERSION }}' );/" wheelpros-hts.php
+
+      - name: Update CHANGELOG.md
+        run: |
+          echo "## [${{ env.VERSION }}] - $(date +'%Y-%m-%d')" >> CHANGELOG.md
+          echo "- Automatically updated changelog for version ${{ env.VERSION }}" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          cat CHANGELOG.md
+
+      - name: Commit Version and Changelog Updates
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add wheelpros-hts.php CHANGELOG.md
+          git commit -m "Update version to ${{ env.VERSION }} and changelog"
+          git push origin main
 
       # Create the ZIP file with the version tag
       - name: Create ZIP
         run: |
-          zip -r wheelpros-hts-${{ github.ref_name }}.zip . -x "*.git*" -x ".github*" -x "node_modules/*" -x "*.log" -x "tests/*" -x "*.md"
+          zip -r wheelpros-hts-${{ env.VERSION }}.zip . -x "*.git*" -x ".github*" -x "node_modules/*" -x "*.log" -x "tests/*" -x "*.md"
 
-      # Duplicate/rename the ZIP file to have a consistent filename
-      - name: Duplicate ZIP
-        run: |
-          cp wheelpros-hts-${{ github.ref_name }}.zip wheelpros-hts-latest.zip
-
-      # Upload the ZIP file with the version tag as a release asset
-      - name: Publish Release with Version Tag
+      # Upload the ZIP file as a release asset
+      - name: Publish Release
         uses: softprops/action-gh-release@v1
         with:
-          files: wheelpros-hts-${{ github.ref_name }}.zip
+          files: wheelpros-hts-${{ env.VERSION }}.zip
         env:
-          GITHUB_TOKEN: ${{ secrets.INDAK_HTS }}
-
-      # Upload the consistent ZIP file for updates
-      - name: Publish Latest ZIP
-        uses: softprops/action-gh-release@v1
-        with:
-          files: wheelpros-hts-latest.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.INDAK_HTS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate Version JSON
         run: |
-          VERSION=${{ github.ref_name }}
           cat <<EOF > version.json
           {
             "name": "WheelPros Integration for HTS",
             "slug": "wheelpros-hts",
-            "version": "${VERSION#v}",
-            "download_url": "https://github.com/${{ github.repository }}/releases/download/${VERSION}/wheelpros-hts-${VERSION#v}.zip",
+            "version": "${{ env.VERSION }}",
+            "download_url": "https://github.com/${{ github.repository }}/releases/download/v${{ env.VERSION }}/wheelpros-hts-latest.zip",
             "requires": "5.0",
-            "tested": "6.7.1",
-            "requires_php": "7.4",
-            "sections" : {
-              "description" : "Plugin description here. You can use HTML."
-            }
+            "tested": "6.3",
+            "requires_php": "7.4"
           }
           EOF
 
-      # Push the version.json file to the version-file branch
       - name: Push Version JSON to version-file Branch
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git checkout -B version-file
           git add version.json
-          git commit -m "Update version.json for ${VERSION}"
+          git commit -m "Update version.json for ${{ env.VERSION }}"
           git push origin version-file --force
