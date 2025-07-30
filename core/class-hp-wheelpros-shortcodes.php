@@ -36,9 +36,19 @@ class HP_WheelPros_Shortcodes {
 
         global $wpdb;
 
-        // Get all wheels for this DisplayStyleNo with images only
-        $wheels = $wpdb->get_results( $wpdb->prepare( "
-            SELECT p.ID,
+        // Get broken images list to exclude them
+        $broken_images = wp_cache_get( 'hp_broken_images_list' );
+        $broken_where_clause = '';
+        $broken_params = array( $display_style_no );
+        
+        if ( ! empty( $broken_images ) && is_array( $broken_images ) ) {
+            $placeholders = implode( ',', array_fill( 0, count( $broken_images ), '%s' ) );
+            $broken_where_clause = " AND pm_image.meta_value NOT IN ($placeholders)";
+            $broken_params = array_merge( $broken_params, $broken_images );
+        }
+
+        // Get all wheels for this DisplayStyleNo with images only (excluding broken ones)
+        $sql = "SELECT p.ID,
                    pm_image.meta_value as image_url,
                    pm_part.meta_value as part_number,
                    pm_desc.meta_value as part_description,
@@ -52,7 +62,7 @@ class HP_WheelPros_Shortcodes {
                    pm_qoh.meta_value as qoh
             FROM {$wpdb->posts} p
             INNER JOIN {$wpdb->postmeta} pm_display ON p.ID = pm_display.post_id AND pm_display.meta_key = 'hp_display_style_no' AND pm_display.meta_value = %s
-            INNER JOIN {$wpdb->postmeta} pm_image ON p.ID = pm_image.post_id AND pm_image.meta_key = 'hp_image_url' AND pm_image.meta_value != '' AND pm_image.meta_value IS NOT NULL
+            INNER JOIN {$wpdb->postmeta} pm_image ON p.ID = pm_image.post_id AND pm_image.meta_key = 'hp_image_url' AND pm_image.meta_value != '' AND pm_image.meta_value IS NOT NULL{$broken_where_clause}
             LEFT JOIN {$wpdb->postmeta} pm_part ON p.ID = pm_part.post_id AND pm_part.meta_key = 'hp_part_number'
             LEFT JOIN {$wpdb->postmeta} pm_desc ON p.ID = pm_desc.post_id AND pm_desc.meta_key = 'hp_part_description'
             LEFT JOIN {$wpdb->postmeta} pm_size ON p.ID = pm_size.post_id AND pm_size.meta_key = 'hp_size'
@@ -64,8 +74,9 @@ class HP_WheelPros_Shortcodes {
             LEFT JOIN {$wpdb->postmeta} pm_load ON p.ID = pm_load.post_id AND pm_load.meta_key = 'hp_load_rating'
             LEFT JOIN {$wpdb->postmeta} pm_qoh ON p.ID = pm_qoh.post_id AND pm_qoh.meta_key = 'hp_total_qoh'
             WHERE p.post_type = 'hp_wheel' AND p.post_status = 'publish'
-            ORDER BY pm_part.meta_value ASC
-        ", $display_style_no ) );
+            ORDER BY pm_part.meta_value ASC";
+
+        $wheels = $wpdb->get_results( $wpdb->prepare( $sql, $broken_params ) );
 
         if ( empty( $wheels ) ) {
             wp_send_json_error( 'No wheels found for this style' );
@@ -255,6 +266,14 @@ class HP_WheelPros_Shortcodes {
             $where_conditions = array( "p.post_type = 'hp_wheel'", "p.post_status = 'publish'" );
             $join_conditions = array();
             $values = array();
+            
+            // Exclude known broken images
+            $broken_images = wp_cache_get( 'hp_broken_images_list' );
+            if ( ! empty( $broken_images ) && is_array( $broken_images ) ) {
+                $placeholders = implode( ',', array_fill( 0, count( $broken_images ), '%s' ) );
+                $where_conditions[] = "pm_image.meta_value NOT IN ($placeholders)";
+                $values = array_merge( $values, $broken_images );
+            }
 
             // Add filter conditions
             if ( $brand ) {
