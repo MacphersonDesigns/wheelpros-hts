@@ -3,7 +3,7 @@
  * Plugin Name:       Harry's WheelPros Importer
  * Plugin URI:        https://example.com/plugins/wheelpros-importer
  * Description:       Securely import WheelPros wheel data from CSV/JSON and display it as a custom post type.
- * Version:           1.7.0
+ * Version:           1.8.0
  * Author:            Alex Macpherson | Macpherson Designs
  * Author URI:        https://macphersondesigns.com
  * License:           GPL-2.0-or-later
