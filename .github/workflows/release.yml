@@ -133,6 +133,15 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           VERSION_NUM="${{ steps.version.outputs.version_num }}"
 
+          # Try to fetch version-file branch, create if it doesn't exist
+          git fetch origin version-file 2>/dev/null || echo "version-file branch doesn't exist yet"
+
+          # Create or switch to version-file branch
+          git checkout version-file 2>/dev/null || git checkout --orphan version-file
+
+          # Clean working directory safely - remove tracked files
+          git ls-files | xargs rm -f 2>/dev/null || true
+
           # Create version.json with extracted version
           cat <<EOF > version.json
           {
@@ -161,19 +170,22 @@ jobs:
           }
           EOF
 
-          # Switch to version-file branch and update
-          git fetch origin version-file || git checkout --orphan version-file
-          git checkout version-file || git checkout --orphan version-file
+          # Create README for version branch
+          cat <<EOF > README.md
+          # Version File Branch
+          This branch contains the version.json file used by the Plugin Update Checker.
+          It is automatically updated by GitHub Actions when changes are pushed to main.
+          EOF
 
-          # Keep only version.json and README - use --ignore-unmatch to prevent failures
-          git rm -rf --ignore-unmatch . 2>/dev/null || true
-          echo '# Version File Branch' > README.md
-          echo 'This branch contains the version.json file used by the Plugin Update Checker.' >> README.md
-          echo 'It is automatically updated by GitHub Actions when changes are pushed to main.' >> README.md
-
-          # Add and commit
+          # Add and commit changes
           git add version.json README.md
-          git commit -m "Update version.json for ${VERSION}" || echo "No changes to commit"
-          git push origin version-file
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update version.json for v${VERSION}"
+            git push origin version-file
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
