@@ -32,10 +32,25 @@ jobs:
           php -l core/*.php || true
           php -l admin/*.php || true
 
-      # Create the ZIP file with the version tag
+      # Extract version from plugin file for dynamic versioning
+      - name: Extract Version
+        id: version
+        run: |
+          if [ -f "harrys-wheelpros-importer.php" ]; then
+            VERSION_NUM=$(grep -oP 'Version:\s*\K[\d.]+' harrys-wheelpros-importer.php || echo "1.8.0")
+          else
+            VERSION_NUM="1.8.0"
+          fi
+          VERSION="v${VERSION_NUM}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "version_num=${VERSION_NUM}" >> $GITHUB_OUTPUT
+          echo "Detected version: ${VERSION}"
+
+      # Create the ZIP file with the version from plugin file
       - name: Create ZIP
         run: |
-          zip -r harrys-wheelpros-importer-${{ github.ref_name }}.zip . \
+          VERSION="${{ steps.version.outputs.version }}"
+          zip -r harrys-wheelpros-importer-${VERSION}.zip . \
             -x "*.git*" \
             -x ".github*" \
             -x "node_modules/*" \
@@ -47,19 +62,20 @@ jobs:
       # Duplicate/rename the ZIP file to have a consistent filename
       - name: Duplicate ZIP
         run: |
-          cp harrys-wheelpros-importer-${{ github.ref_name }}.zip harrys-wheelpros-importer-latest.zip
+          VERSION="${{ steps.version.outputs.version }}"
+          cp harrys-wheelpros-importer-${VERSION}.zip harrys-wheelpros-importer-latest.zip
 
       # Upload the ZIP file with the version tag as a release asset
       - name: Publish Release with Version Tag
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            harrys-wheelpros-importer-${{ github.ref_name }}.zip
+            harrys-wheelpros-importer-${{ steps.version.outputs.version }}.zip
             harrys-wheelpros-importer-latest.zip
-          tag_name: ${{ github.ref_name }}
-          name: "Release ${{ github.ref_name }}"
+          tag_name: ${{ steps.version.outputs.version }}
+          name: "Release ${{ steps.version.outputs.version }}"
           body: |
-            ## Harry's WheelPros Importer ${{ github.ref_name }}
+            ## Harry's WheelPros Importer ${{ steps.version.outputs.version }}
 
             ### Installation
             1. Download the ZIP file below
@@ -73,14 +89,14 @@ jobs:
             - Real-time progress tracking
             - Automatic updates from GitHub
 
-            **Download:** harrys-wheelpros-importer-${{ github.ref_name }}.zip
+            **Download:** harrys-wheelpros-importer-${{ steps.version.outputs.version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate Version JSON
         run: |
-          VERSION=${{ github.ref_name }}
-          VERSION_NUM=${VERSION#v}
+          VERSION="${{ steps.version.outputs.version }}"
+          VERSION_NUM="${{ steps.version.outputs.version_num }}"
           cat <<EOF > version.json
           {
             "name": "Harry's WheelPros Importer",
@@ -114,21 +130,10 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
-          # If this is a tag release, use the tag version
-          if [[ ${{ github.ref_type }} == "tag" ]]; then
-            VERSION=${{ github.ref_name }}
-            VERSION_NUM=${VERSION#v}
-          else
-            # For main branch pushes, increment patch version
-            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.6.0")
-            VERSION_NUM=${LATEST_TAG#v}
-            IFS='.' read -ra VERSION_PARTS <<< "$VERSION_NUM"
-            PATCH_NUM=$((${VERSION_PARTS[2]} + 1))
-            VERSION_NUM="${VERSION_PARTS[0]}.${VERSION_PARTS[1]}.${PATCH_NUM}"
-            VERSION="v${VERSION_NUM}"
-          fi
+          VERSION="${{ steps.version.outputs.version }}"
+          VERSION_NUM="${{ steps.version.outputs.version_num }}"
 
-          # Create version.json with dynamic version
+          # Create version.json with extracted version
           cat <<EOF > version.json
           {
             "name": "Harry's WheelPros Importer",
@@ -160,8 +165,8 @@ jobs:
           git fetch origin version-file || git checkout --orphan version-file
           git checkout version-file || git checkout --orphan version-file
 
-          # Keep only version.json and README
-          git rm -rf . 2>/dev/null || true
+          # Keep only version.json and README - use --ignore-unmatch to prevent failures
+          git rm -rf --ignore-unmatch . 2>/dev/null || true
           echo '# Version File Branch' > README.md
           echo 'This branch contains the version.json file used by the Plugin Update Checker.' >> README.md
           echo 'It is automatically updated by GitHub Actions when changes are pushed to main.' >> README.md
