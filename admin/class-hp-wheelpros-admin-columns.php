@@ -22,7 +22,7 @@ class HP_WheelPros_Admin_Columns {
         add_action( 'manage_hp_wheel_posts_custom_column', array( __CLASS__, 'populate_custom_columns' ), 10, 2 );
         add_filter( 'manage_edit-hp_wheel_sortable_columns', array( __CLASS__, 'add_sortable_columns' ) );
         add_action( 'admin_head', array( __CLASS__, 'add_admin_styles' ) );
-        
+
         // Handle sorting for custom columns
         add_action( 'pre_get_posts', array( __CLASS__, 'handle_custom_column_sorting' ) );
     }
@@ -124,7 +124,7 @@ class HP_WheelPros_Admin_Columns {
      */
     private static function render_image_column( $post_id ) {
         $image_url = get_post_meta( $post_id, 'hp_image_url', true );
-        
+
         if ( empty( $image_url ) ) {
             echo '<span class="hp-no-image">No Image</span>';
             return;
@@ -336,11 +336,11 @@ class HP_WheelPros_Admin_Columns {
         }
 
         $placeholders = implode( ',', array_fill( 0, count( $broken_images ), '%s' ) );
-        
+
         $count = $wpdb->get_var( $wpdb->prepare( "
-            SELECT COUNT(DISTINCT post_id) 
-            FROM {$wpdb->postmeta} 
-            WHERE meta_key = 'hp_image_url' 
+            SELECT COUNT(DISTINCT post_id)
+            FROM {$wpdb->postmeta}
+            WHERE meta_key = 'hp_image_url'
             AND meta_value IN ($placeholders)
         ", $broken_images ) );
 

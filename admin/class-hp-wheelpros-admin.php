@@ -43,7 +43,7 @@ class HP_WheelPros_Admin {
         // Two-phase import system
         add_action( 'wp_ajax_hp_download_csv', array( $this, 'ajax_download_csv' ) );
         add_action( 'wp_ajax_hp_process_cached_csv', array( $this, 'ajax_process_cached_csv' ) );
-        
+
         // Broken image tracking
         add_action( 'wp_ajax_hp_mark_image_broken', array( $this, 'ajax_mark_image_broken' ) );
     }
@@ -1336,7 +1336,7 @@ class HP_WheelPros_Admin {
         }
 
         $image_url = sanitize_text_field( $_POST['image_url'] ?? '' );
-        
+
         if ( empty( $image_url ) ) {
             wp_send_json_error( 'No image URL provided' );
         }
@@ -1350,15 +1350,15 @@ class HP_WheelPros_Admin {
         if ( $broken_images === false ) {
             $broken_images = array();
         }
-        
+
         if ( ! in_array( $image_url, $broken_images ) ) {
             $broken_images[] = $image_url;
             wp_cache_set( 'hp_broken_images_list', $broken_images, '', 3600 );
         }
 
-        wp_send_json_success( array( 
+        wp_send_json_success( array(
             'message' => 'Image marked as broken',
-            'image_url' => $image_url 
+            'image_url' => $image_url
         ) );
     }
 }

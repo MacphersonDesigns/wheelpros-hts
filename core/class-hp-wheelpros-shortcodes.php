@@ -29,6 +29,7 @@ class HP_WheelPros_Shortcodes {
         }
 
         $display_style_no = sanitize_text_field( $_POST['style_slug'] );
+        $brand_name = sanitize_text_field( $_POST['brand_name'] ?? '' );
 
         if ( empty( $display_style_no ) ) {
             wp_send_json_error( 'Display style number required' );
@@ -39,15 +40,22 @@ class HP_WheelPros_Shortcodes {
         // Get broken images list to exclude them
         $broken_images = wp_cache_get( 'hp_broken_images_list' );
         $broken_where_clause = '';
-        $broken_params = array( $display_style_no );
-        
+        $brand_where_clause = '';
+        $params = array( $display_style_no );
+
+        // Add brand filter if provided
+        if ( ! empty( $brand_name ) ) {
+            $brand_where_clause = " AND pm_brand.meta_value = %s";
+            $params[] = $brand_name;
+        }
+
         if ( ! empty( $broken_images ) && is_array( $broken_images ) ) {
             $placeholders = implode( ',', array_fill( 0, count( $broken_images ), '%s' ) );
             $broken_where_clause = " AND pm_image.meta_value NOT IN ($placeholders)";
-            $broken_params = array_merge( $broken_params, $broken_images );
+            $params = array_merge( $params, $broken_images );
         }
 
-        // Get all wheels for this DisplayStyleNo with images only (excluding broken ones)
+        // Get all wheels for this DisplayStyleNo and Brand with images only (excluding broken ones)
         $sql = "SELECT p.ID,
                    pm_image.meta_value as image_url,
                    pm_part.meta_value as part_number,
@@ -73,10 +81,10 @@ class HP_WheelPros_Shortcodes {
             LEFT JOIN {$wpdb->postmeta} pm_bore ON p.ID = pm_bore.post_id AND pm_bore.meta_key = 'hp_center_bore'
             LEFT JOIN {$wpdb->postmeta} pm_load ON p.ID = pm_load.post_id AND pm_load.meta_key = 'hp_load_rating'
             LEFT JOIN {$wpdb->postmeta} pm_qoh ON p.ID = pm_qoh.post_id AND pm_qoh.meta_key = 'hp_total_qoh'
-            WHERE p.post_type = 'hp_wheel' AND p.post_status = 'publish'
+            WHERE p.post_type = 'hp_wheel' AND p.post_status = 'publish'{$brand_where_clause}
             ORDER BY pm_part.meta_value ASC";
 
-        $wheels = $wpdb->get_results( $wpdb->prepare( $sql, $broken_params ) );
+        $wheels = $wpdb->get_results( $wpdb->prepare( $sql, $params ) );
 
         if ( empty( $wheels ) ) {
             wp_send_json_error( 'No wheels found for this style' );
@@ -242,12 +250,12 @@ class HP_WheelPros_Shortcodes {
 
         global $wpdb;
 
-        // Optimized query: Get display styles with valid images and group by image URL for duplicates
-        $cache_key = 'hp_wheel_display_styles_' . md5( serialize( compact( 'brand', 'finish', 'size', 'bolt_pattern', 'style' ) ) );
+        // Optimized query: Get display styles with valid images, grouped by display style AND brand to prevent mixing different wheel types
+        $cache_key = 'hp_wheel_display_styles_v2_' . md5( serialize( compact( 'brand', 'finish', 'size', 'bolt_pattern', 'style' ) ) );
         $display_style_groups = wp_cache_get( $cache_key );
 
         if ( false === $display_style_groups ) {
-            // Build optimized SQL query - group by display style only, not image
+            // Build optimized SQL query - group by display style AND brand to prevent mixing different wheel types
             $sql = "SELECT
                         pm_display.meta_value as display_style_no,
                         MIN(pm_image.meta_value) as image_url,
@@ -266,7 +274,7 @@ class HP_WheelPros_Shortcodes {
             $where_conditions = array( "p.post_type = 'hp_wheel'", "p.post_status = 'publish'" );
             $join_conditions = array();
             $values = array();
-            
+
             // Exclude known broken images
             $broken_images = wp_cache_get( 'hp_broken_images_list' );
             if ( ! empty( $broken_images ) && is_array( $broken_images ) ) {
@@ -302,8 +310,8 @@ class HP_WheelPros_Shortcodes {
             }
 
             $sql .= ' WHERE ' . implode( ' AND ', $where_conditions );
-            $sql .= ' GROUP BY pm_display.meta_value';
-            $sql .= ' ORDER BY display_style_no ASC';
+            $sql .= ' GROUP BY pm_display.meta_value, pm_brand.meta_value';
+            $sql .= ' ORDER BY pm_brand.meta_value ASC, display_style_no ASC';
 
             if ( ! empty( $values ) ) {
                 $sql = $wpdb->prepare( $sql, $values );
@@ -458,7 +466,7 @@ class HP_WheelPros_Shortcodes {
                         </div>
 
                         <div class="hp-wheel-actions" style="display:flex; flex-direction:column; gap:8px;">
-                            <a href="#" class="hp-view-variations" data-style="<?php echo esc_attr( $group->display_style_no ); ?>" data-style-name="<?php echo esc_attr( $group_title ); ?>" style="display:block; padding:12px 16px; background:#2c3e50; color:#fff; border-radius:6px; text-decoration:none; font-size:0.85em; font-weight:600; transition:background 0.3s ease; text-align:center;" onmouseover="this.style.background='#34495e'" onmouseout="this.style.background='#2c3e50'">
+                            <a href="#" class="hp-view-variations" data-style="<?php echo esc_attr( $group->display_style_no ); ?>" data-brand="<?php echo esc_attr( $group->brand_name ); ?>" data-style-name="<?php echo esc_attr( $group_title ); ?>" style="display:block; padding:12px 16px; background:#2c3e50; color:#fff; border-radius:6px; text-decoration:none; font-size:0.85em; font-weight:600; transition:background 0.3s ease; text-align:center;" onmouseover="this.style.background='#34495e'" onmouseout="this.style.background='#2c3e50'">
                                 <?php esc_html_e( 'View All Options', 'wheelpros-importer' ); ?>
                             </a>
                             <?php if ( $call_phone ) : ?>
@@ -532,16 +540,18 @@ class HP_WheelPros_Shortcodes {
                 btn.addEventListener('click', function(e){
                     e.preventDefault();
                     const styleSlug = this.getAttribute('data-style');
+                    const brandName = this.getAttribute('data-brand');
                     const styleName = this.getAttribute('data-style-name');
 
                     modalTitle.textContent = styleName + ' - All Options';
                     modalContent.innerHTML = '<div style="text-align:center; padding:40px;"><div style="display:inline-block; width:40px; height:40px; border:4px solid #f3f3f3; border-top:4px solid #3498db; border-radius:50%; animation:spin 1s linear infinite;"></div><p style="margin-top:15px; color:#666;">Loading variations...</p></div>';
                     modal.style.display = 'flex';
 
-                    // AJAX call to get all variations for this style
+                    // AJAX call to get all variations for this style and brand combination
                     const formData = new FormData();
                     formData.append('action', 'hp_get_wheel_variations');
                     formData.append('style_slug', styleSlug);
+                    formData.append('brand_name', brandName);
                     formData.append('nonce', '<?php echo wp_create_nonce( "hp_wheel_variations" ); ?>');
 
                     fetch('<?php echo admin_url( "admin-ajax.php" ); ?>', {

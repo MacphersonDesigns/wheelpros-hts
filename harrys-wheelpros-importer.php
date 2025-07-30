@@ -127,7 +127,7 @@ function hp_wheelpros_admin_init() {
     if ( is_admin() ) {
         // Instantiate admin class to hook menus and forms.
         HP_WheelPros_Admin::get_instance();
-        
+
         // Initialize admin columns for better wheel management
         if ( class_exists( 'HP_WheelPros_Admin_Columns' ) ) {
             HP_WheelPros_Admin_Columns::init();
