@@ -23,27 +23,53 @@ A robust WordPress plugin for importing and displaying WheelPros wheel catalog d
 ## Configuration
 
 ### SFTP Settings
+
 Navigate to **WheelPros Importer > Settings** and configure:
+
 - SFTP Host
 - Username and Password
 - Port (default: 22)
 - Remote file path
 
 ### Import Options
+
 - **Two-Phase Import**: Recommended for large files (downloads then processes in batches)
 - **Manual Upload**: Upload CSV files directly
 - **Scheduled Import**: Automatic weekly imports via WordPress cron
 
+"🚀 FUTURE UPDATE WORKFLOW:
+
+1. Make your code changes locally
+2. Update version in plugin header:
+   Edit: harrys-wheelpros-importer.php
+   Change: Version: 1.6.0
+
+3. Commit and push changes:
+   git add .
+   git commit -m 'Version 1.6.0: New features added'
+   git push origin main
+
+4. Create release tag:
+   git tag -a v1.6.0 -m 'Release v1.6.0: Description'
+   git push origin v1.6.0
+
+5. Users automatically get update notifications! ✨
+
+That's it - the Plugin Update Checker handles everything else!"
+
 ## Usage
 
 ### Admin Import
+
 1. Go to **WheelPros Importer > Import**
 2. Choose import method:
    - **Two-Phase Import**: For SFTP downloads (recommended)
    - **Manual Upload**: For local CSV files
 
 ### Frontend Display
+
 Use the shortcode to display wheels with filtering:
+
 ```
 [hp_wheels]
 ```
@@ -58,6 +84,7 @@ Use the shortcode to display wheels with filtering:
 ## Changelog
 
 ### 1.5.9
+
 - Cleaned up admin interface
 - Removed legacy import methods
 - Optimized memory usage for large imports

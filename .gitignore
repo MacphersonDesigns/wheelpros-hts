@@ -46,3 +46,7 @@ Icon?
 
 # Plugin specific
 /wp-content/wheelpros-importer-debug.log
+
+# Update checker (included in releases but not tracked in git)
+# Uncomment the next line if you want to exclude it from version control
+# plugin-update-checker/

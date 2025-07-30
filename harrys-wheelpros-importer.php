@@ -153,8 +153,8 @@ function hp_wheelpros_init_update_checker() {
     // Set the branch that contains the stable release
     $updateChecker->setBranch('main');
     
-    // Enable GitHub releases (optional, can use tags instead)
-    $updateChecker->getVcsApi()->enableReleaseAssets();
+    // For private repositories, uncomment and add your GitHub token:
+    // $updateChecker->setAuthentication('your_github_personal_access_token_here');
 }
 
 // Initialize update checker after WordPress loads but before admin_init
