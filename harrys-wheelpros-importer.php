@@ -26,8 +26,12 @@ if ( file_exists( __DIR__ . '/vendor/autoload.php' ) ) {
     require_once __DIR__ . '/vendor/autoload.php';
 }
 
+// Load the Plugin Update Checker library
+require_once __DIR__ . '/plugin-update-checker/plugin-update-checker.php';
+use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
+
 // Define plugin constants.
-define( 'HP_WHEELPROS_PLUGIN_VERSION', '1.0.0' );
+define( 'HP_WHEELPROS_PLUGIN_VERSION', '1.5.9' );
 define( 'HP_WHEELPROS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'HP_WHEELPROS_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
@@ -135,3 +139,23 @@ function hp_wheelpros_run_scheduled_import() {
     $importer->run_weekly_import();
 }
 add_action( 'hp_wheelpros_weekly_import', 'hp_wheelpros_run_scheduled_import' );
+
+/**
+ * Initialize the automatic update checker.
+ */
+function hp_wheelpros_init_update_checker() {
+    $updateChecker = PucFactory::buildUpdateChecker(
+        'https://github.com/MacphersonDesigns/wheelpros-hts/',
+        __FILE__,
+        'harrys-wheelpros-importer'
+    );
+
+    // Set the branch that contains the stable release
+    $updateChecker->setBranch('main');
+    
+    // Enable GitHub releases (optional, can use tags instead)
+    $updateChecker->getVcsApi()->enableReleaseAssets();
+}
+
+// Initialize update checker after WordPress loads but before admin_init
+add_action( 'init', 'hp_wheelpros_init_update_checker', 5 );
