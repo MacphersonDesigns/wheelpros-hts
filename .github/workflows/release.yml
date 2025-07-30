@@ -1,0 +1,130 @@
+name: Build, Release, and Update JSON
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  packages: write
+  issues: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.1
+          ini-file: production
+
+      - name: Validate PHP
+        run: |
+          php -l *.php || true
+          php -l core/*.php || true
+          php -l admin/*.php || true
+
+      # Create the ZIP file with the version tag
+      - name: Create ZIP
+        run: |
+          zip -r harrys-wheelpros-importer-${{ github.ref_name }}.zip . \
+            -x "*.git*" \
+            -x ".github*" \
+            -x "node_modules/*" \
+            -x "*.log" \
+            -x "tests/*" \
+            -x "*.md" \
+            -x "AUTO-UPDATE-SETUP.md"
+
+      # Duplicate/rename the ZIP file to have a consistent filename
+      - name: Duplicate ZIP
+        run: |
+          cp harrys-wheelpros-importer-${{ github.ref_name }}.zip harrys-wheelpros-importer-latest.zip
+
+      # Upload the ZIP file with the version tag as a release asset
+      - name: Publish Release with Version Tag
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            harrys-wheelpros-importer-${{ github.ref_name }}.zip
+            harrys-wheelpros-importer-latest.zip
+          tag_name: ${{ github.ref_name }}
+          name: "Release ${{ github.ref_name }}"
+          body: |
+            ## Harry's WheelPros Importer ${{ github.ref_name }}
+            
+            ### Installation
+            1. Download the ZIP file below
+            2. Upload to WordPress via Plugins > Add New > Upload Plugin
+            3. Activate the plugin
+            
+            ### Features
+            - Memory-efficient two-phase import system
+            - Secure SFTP import from WheelPros servers
+            - Manual CSV upload fallback
+            - Real-time progress tracking
+            - Automatic updates from GitHub
+            
+            **Download:** harrys-wheelpros-importer-${{ github.ref_name }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate Version JSON
+        run: |
+          VERSION=${{ github.ref_name }}
+          VERSION_NUM=${VERSION#v}
+          cat <<EOF > version.json
+          {
+            "name": "Harry's WheelPros Importer",
+            "slug": "harrys-wheelpros-importer",
+            "version": "${VERSION_NUM}",
+            "download_url": "https://github.com/${{ github.repository }}/releases/download/${VERSION}/harrys-wheelpros-importer-${VERSION}.zip",
+            "requires": "5.0",
+            "tested": "6.7.1",
+            "requires_php": "7.4",
+            "author": "Alex Macpherson | Macpherson Designs",
+            "author_homepage": "https://macphersondesigns.com",
+            "sections": {
+              "description": "Securely import WheelPros wheel data from CSV/JSON and display it as a custom post type with advanced filtering capabilities.",
+              "installation": "1. Download the plugin ZIP file\\n2. Upload via WordPress Admin > Plugins > Add New > Upload Plugin\\n3. Activate the plugin\\n4. Configure SFTP settings in WheelPros Importer > Settings",
+              "changelog": "See release notes at https://github.com/${{ github.repository }}/releases"
+            },
+            "banners": {
+              "low": "",
+              "high": ""
+            },
+            "icons": {
+              "1x": "",
+              "2x": ""
+            }
+          }
+          EOF
+
+      # Push the version.json file to the version-file branch
+      - name: Push Version JSON to version-file Branch
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git fetch origin version-file || git checkout --orphan version-file
+          git checkout version-file || git checkout --orphan version-file
+          
+          # Keep only version.json
+          git rm -rf . 2>/dev/null || true
+          
+          # Add the new version.json
+          echo '# Version File Branch' > README.md
+          echo 'This branch contains the version.json file used by the Plugin Update Checker.' >> README.md
+          echo 'It is automatically updated by GitHub Actions when new releases are created.' >> README.md
+          
+          # Add both files
+          git add version.json README.md
+          git commit -m "Update version.json for ${VERSION}" || echo "No changes to commit"
+          git push origin version-file
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

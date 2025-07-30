@@ -144,18 +144,14 @@ add_action( 'hp_wheelpros_weekly_import', 'hp_wheelpros_run_scheduled_import' );
  * Initialize the automatic update checker.
  */
 function hp_wheelpros_init_update_checker() {
+    // Use the version.json file from the version-file branch for more detailed update info
     $updateChecker = PucFactory::buildUpdateChecker(
-        'https://github.com/MacphersonDesigns/wheelpros-hts/',
+        'https://raw.githubusercontent.com/MacphersonDesigns/wheelpros-hts/version-file/version.json',
         __FILE__,
         'harrys-wheelpros-importer'
     );
 
-    // Set the branch that contains the stable release
-    $updateChecker->setBranch('main');
-    
     // For private repositories, uncomment and add your GitHub token:
     // $updateChecker->setAuthentication('your_github_personal_access_token_here');
-}
-
-// Initialize update checker after WordPress loads but before admin_init
+}// Initialize update checker after WordPress loads but before admin_init
 add_action( 'init', 'hp_wheelpros_init_update_checker', 5 );
