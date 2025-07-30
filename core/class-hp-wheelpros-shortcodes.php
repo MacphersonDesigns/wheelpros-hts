@@ -199,7 +199,29 @@ class HP_WheelPros_Shortcodes {
             select.addEventListener('change', function() {
                 const selectedOption = this.options[this.selectedIndex];
                 const wheelData = JSON.parse(selectedOption.dataset.wheel);
-                const detailsContainer = this.closest('.wheel-variation-card, [style*="border"]').querySelector('.wheel-details');
+                const cardContainer = this.closest('[style*="border"]');
+                const detailsContainer = cardContainer.querySelector('.wheel-details');
+
+                // Update the main image
+                const imageElement = cardContainer.querySelector('img');
+                if (imageElement && wheelData.image_url) {
+                    // Add loading state
+                    imageElement.style.opacity = '0.5';
+                    
+                    // Create a new image to test if it loads successfully
+                    const newImage = new Image();
+                    newImage.onload = function() {
+                        imageElement.src = wheelData.image_url;
+                        imageElement.alt = wheelData.part_number || '';
+                        imageElement.style.opacity = '1';
+                    };
+                    newImage.onerror = function() {
+                        // If new image fails to load, keep current image and restore opacity
+                        imageElement.style.opacity = '1';
+                        console.warn('Failed to load new wheel image:', wheelData.image_url);
+                    };
+                    newImage.src = wheelData.image_url;
+                }
 
                 // Update details
                 detailsContainer.querySelector('.detail-brand').textContent = wheelData.brand || '';
@@ -221,6 +243,12 @@ class HP_WheelPros_Shortcodes {
 
                 // Update part number
                 detailsContainer.querySelector('h4').textContent = wheelData.part_number || '';
+
+                // Update part description if it exists
+                const descriptionElement = detailsContainer.querySelector('p');
+                if (descriptionElement && wheelData.part_description) {
+                    descriptionElement.textContent = wheelData.part_description;
+                }
             });
         });
         </script>
