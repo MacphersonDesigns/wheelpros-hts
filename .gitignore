@@ -1,0 +1,48 @@
+# WordPress files
+wp-config.php
+wp-content/uploads/
+wp-content/cache/
+wp-content/backup-db/
+wp-content/advanced-cache.php
+wp-content/wp-cache-config.php
+wp-content/debug.log
+
+# Node modules and build files
+node_modules/
+dist/
+build/
+*.min.js
+*.min.css
+
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+
+# PHP Storm
+.phpstorm.meta.php
+
+# Composer
+composer.phar
+# Note: we're keeping vendor/ for now since it contains phpseclib
+
+# Log files
+*.log
+error_log
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store*
+ehthumbs.db
+Icon?
+
+# Plugin specific
+/wp-content/wheelpros-importer-debug.log
