@@ -22,6 +22,12 @@ class HP_WheelPros_Importer {
     const BATCH_SIZE = 100;
 
     /**
+     * Cache of existing posts indexed by part number.
+     * @var array
+     */
+    protected $existing_posts_cache = array();
+
+    /**
      * Progress key used for tracking import progress in transients.
      * @var string
      */
@@ -355,6 +361,10 @@ class HP_WheelPros_Importer {
             fclose( $handle );
             return new WP_Error( 'csv_header_error', __( 'Invalid CSV header.', 'wheelpros-importer' ) );
         }
+        
+        // Preload existing posts for fast lookups
+        $this->preload_existing_posts();
+        
         $rows         = array();
         $row_count    = 0;
         $imported     = 0;
@@ -516,6 +526,15 @@ class HP_WheelPros_Importer {
         $skipped_no_image = 0;
         $skipped_hidden_brand = 0;
 
+        // Performance optimization: suspend object cache during bulk operations
+        $original_cache_state = wp_suspend_cache_addition( true );
+        
+        // Defer term counting for taxonomy assignments
+        wp_defer_term_counting( true );
+        
+        // Remove kses filters to speed up sanitization (we're handling it manually)
+        kses_remove_filters();
+
         foreach ( $rows as $row ) {
             // Skip if no part number.
             if ( empty( $row['PartNumber'] ) ) {
@@ -562,7 +581,8 @@ class HP_WheelPros_Importer {
                 }
                 $imported++;
             }
-            // Save meta fields (sanitized).
+            // Save meta fields (sanitized) - batch prepare all meta for single operation
+            $meta_data = array();
             $meta_map = array(
                 'PartDescription' => 'part_description',
                 'DisplayStyleNo'  => 'display_style_no',
@@ -586,22 +606,26 @@ class HP_WheelPros_Importer {
                 if ( isset( $row[ $key ] ) ) {
                     $value = $row[ $key ];
                     // Use appropriate sanitization based on field.
-                    if ( in_array( $meta_key, array( 'size', 'bolt_pattern', 'style', 'display_style_no', 'brand', 'finish', 'part_description' ), true ) ) {
-                        $value = sanitize_text_field( $value );
-                    } elseif ( in_array( $meta_key, array( 'offset', 'center_bore', 'load_rating', 'shipping_weight', 'total_qoh', 'msrp_usd', 'map_usd' ), true ) ) {
-                        $value = sanitize_text_field( $value );
-                    } elseif ( 'image_url' === $meta_key ) {
+                    if ( 'image_url' === $meta_key ) {
                         $value = esc_url_raw( $value );
-                    } elseif ( 'run_date' === $meta_key ) {
-                        $value = sanitize_text_field( $value );
                     } else {
                         $value = sanitize_text_field( $value );
                     }
-                    update_post_meta( $post_id, 'hp_' . $meta_key, $value );
+                    $meta_data[ 'hp_' . $meta_key ] = $value;
                 }
             }
-            // Save part number as meta.
-            update_post_meta( $post_id, 'hp_part_number', $part_number );
+            // Add part number to meta batch
+            $meta_data['hp_part_number'] = $part_number;
+            
+            // Batch update all meta fields in one operation
+            foreach ( $meta_data as $meta_key => $meta_value ) {
+                update_post_meta( $post_id, $meta_key, $meta_value );
+            }
+            
+            // Update cache if this is a new post
+            if ( ! $existing ) {
+                $this->existing_posts_cache[ $part_number ] = get_post( $post_id );
+            }
             // Assign taxonomies.
             // Display style: group by DisplayStyleNo.
             if ( ! empty( $row['DisplayStyleNo'] ) ) {
@@ -636,6 +660,15 @@ class HP_WheelPros_Importer {
             }
             error_log( sprintf( 'WheelPros Import: Skipped %d items from hidden brands in this batch', $skipped_hidden_brand ) );
         }
+
+        // Re-enable term counting and process deferred counts
+        wp_defer_term_counting( false );
+        
+        // Restore kses filters
+        kses_init_filters();
+        
+        // Restore cache state
+        wp_suspend_cache_addition( $original_cache_state );
 
         return array( $imported, $updated, $processed );
     }
@@ -677,21 +710,36 @@ class HP_WheelPros_Importer {
     }
 
     /**
-     * Retrieve a wheel post by part number.
+     * Preload all existing wheel posts into memory cache.
+     * This eliminates individual database queries for each row.
+     *
+     * @return void
+     */
+    protected function preload_existing_posts() {
+        $args = array(
+            'post_type'      => 'hp_wheel',
+            'posts_per_page' => -1,
+            'post_status'    => array( 'publish', 'draft' ),
+            'fields'         => 'ids',
+        );
+        $post_ids = get_posts( $args );
+        
+        foreach ( $post_ids as $post_id ) {
+            $part_number = get_post_meta( $post_id, 'hp_part_number', true );
+            if ( ! empty( $part_number ) ) {
+                $this->existing_posts_cache[ $part_number ] = get_post( $post_id );
+            }
+        }
+    }
+
+    /**
+     * Retrieve a wheel post by part number from cache.
      *
      * @param string $part_number
      * @return WP_Post|false
      */
     protected function get_post_by_part_number( $part_number ) {
-        $args = array(
-            'post_type'      => 'hp_wheel',
-            'posts_per_page' => 1,
-            'meta_key'       => 'hp_part_number',
-            'meta_value'     => $part_number,
-            'post_status'    => array( 'publish', 'draft' ),
-        );
-        $posts = get_posts( $args );
-        return ! empty( $posts ) ? $posts[0] : false;
+        return isset( $this->existing_posts_cache[ $part_number ] ) ? $this->existing_posts_cache[ $part_number ] : false;
     }
 
     /**
@@ -711,6 +759,12 @@ class HP_WheelPros_Importer {
             fclose( $handle );
             return new WP_Error( 'csv_header_error', __( 'Invalid CSV header.', 'wheelpros-importer' ) );
         }
+        
+        // Preload all existing posts into memory cache for fast lookups
+        $this->add_progress_message( __( 'Loading existing wheels into cache...', 'wheelpros-importer' ) );
+        $this->preload_existing_posts();
+        $this->add_progress_message( sprintf( __( 'Cached %d existing wheels', 'wheelpros-importer' ), count( $this->existing_posts_cache ) ) );
+        
         $keys       = array_map( 'trim', $header );
         $imported   = 0;
         $updated    = 0;
@@ -777,6 +831,12 @@ class HP_WheelPros_Importer {
         if ( null === $data ) {
             return new WP_Error( 'json_parse_error', __( 'Invalid JSON file.', 'wheelpros-importer' ) );
         }
+        
+        // Preload all existing posts into memory cache for fast lookups
+        $this->add_progress_message( __( 'Loading existing wheels into cache...', 'wheelpros-importer' ) );
+        $this->preload_existing_posts();
+        $this->add_progress_message( sprintf( __( 'Cached %d existing wheels', 'wheelpros-importer' ), count( $this->existing_posts_cache ) ) );
+        
         // Determine rows array structure.
         $rows = array();
         if ( isset( $data[0] ) && is_array( $data[0] ) && isset( $data[0]['PartNumber'] ) ) {
