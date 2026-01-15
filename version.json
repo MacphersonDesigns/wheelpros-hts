@@ -1,0 +1,24 @@
+{
+	"name": "Harry's WheelPros Importer",
+	"slug": "harrys-wheelpros-importer",
+	"version": "1.11.1",
+	"download_url": "https://github.com/MacphersonDesigns/wheelpros-hts/releases/download/v1.11.1/harrys-wheelpros-importer-v1.11.1.zip",
+	"requires": "5.0",
+	"tested": "6.8.2",
+	"requires_php": "7.4",
+	"author": "Alex Macpherson | Indak Media",
+	"author_homepage": "https://indakmedia.com",
+	"sections": {
+		"description": "Securely import WheelPros wheel data from CSV/JSON and display it as a custom post type with advanced filtering capabilities. Features memory-efficient two-phase import system, real-time progress tracking, automatic GitHub updates, vehicle fitment search, and brand management.",
+		"installation": "1. Download the plugin ZIP file<br/>2. Upload via WordPress Admin > Plugins > Add New > Upload Plugin<br/>3. Activate the plugin<br/>4. Configure SFTP settings in WheelPros Importer > Settings",
+		"changelog": "<h4>1.11.1</h4><ul><li>🐛 CRITICAL FIX: Brand filter no longer breaks Divi pages</li><li>✅ Fixed posts_where filter applying too broadly</li><li>🎯 Brand filtering now only affects hp_wheel queries</li><li>🚗 Vehicle search with cascading Year/Make/Model/Trim dropdowns</li><li>🔧 API Diagnostics tool to test WheelPros API connection</li><li>🖼️ Automatic image validation during import (50% faster)</li><li>📚 Comprehensive documentation added</li></ul><h4>1.11.0</h4><ul><li>✨ Improved Brand Manager with clear Hide/Show UI</li><li>🔧 Bulk actions: Convert hidden brands to drafts or delete permanently</li><li>⚡ Import now checks brand visibility BEFORE importing (saves time)</li><li>🎯 Enhanced frontend filtering - hides brands from all queries</li><li>🔄 Brands automatically detected from CSV imports</li><li>📊 Added import logging for skipped hidden brands</li></ul><h4>1.10.0</h4><ul><li>🚗 NEW: Vehicle Fitment Search - Filter products by Year/Make/Model/Trim</li><li>🔄 Cascading dropdown integration with WheelPros Vehicle API</li><li>📋 New shortcode: [wheelpros_vehicle_search]</li><li>🎯 Smart product filtering based on vehicle specifications</li><li>💾 Automatic caching of vehicle data for better performance</li><li>📖 Complete documentation in VEHICLE-SEARCH.md</li><li>🛠️ Example implementations in examples/vehicle-filter-examples.php</li></ul><h4>1.9.0</h4><ul><li>🖼️ Advanced image validation (three-layer solution)</li><li>✅ URL validation, HTTP status checks, and SQL filtering</li><li>🛠️ Admin utility to batch-validate images</li></ul>"
+	},
+	"banners": {
+		"low": "",
+		"high": ""
+	},
+	"icons": {
+		"1x": "",
+		"2x": ""
+	}
+}
