@@ -449,6 +449,61 @@ class HP_WheelPros_Importer {
     }
 
     /**
+     * Validate if an image URL is accessible and returns valid content.
+     *
+     * @param string $url Image URL to validate.
+     * @return bool True if image is valid and accessible.
+     */
+    protected function validate_image_url( $url ) {
+        // Quick validation: check if URL is not empty and has valid format
+        if ( empty( $url ) || ! filter_var( $url, FILTER_VALIDATE_URL ) ) {
+            return false;
+        }
+
+        // Check cache first to avoid repeated requests
+        $cache_key = 'hp_image_valid_' . md5( $url );
+        $cached = wp_cache_get( $cache_key );
+        if ( $cached !== false ) {
+            return $cached === 'valid';
+        }
+
+        // Perform a HEAD request to check if image exists without downloading it
+        $response = wp_remote_head( $url, array(
+            'timeout'     => 5,
+            'redirection' => 3,
+            'user-agent'  => 'WordPress/WheelPros-Importer',
+        ) );
+
+        $is_valid = false;
+        if ( ! is_wp_error( $response ) ) {
+            $status_code = wp_remote_retrieve_response_code( $response );
+            $content_type = wp_remote_retrieve_header( $response, 'content-type' );
+
+            // Consider valid if: 200 status and content-type is an image
+            if ( $status_code === 200 && strpos( $content_type, 'image/' ) === 0 ) {
+                $is_valid = true;
+            }
+        }
+
+        // Cache the result for 1 hour to avoid repeated checks
+        wp_cache_set( $cache_key, $is_valid ? 'valid' : 'invalid', '', 3600 );
+
+        // Also add to broken images list if invalid
+        if ( ! $is_valid ) {
+            $broken_images = wp_cache_get( 'hp_broken_images_list' );
+            if ( $broken_images === false ) {
+                $broken_images = array();
+            }
+            if ( ! in_array( $url, $broken_images ) ) {
+                $broken_images[] = $url;
+                wp_cache_set( 'hp_broken_images_list', $broken_images, '', 3600 );
+            }
+        }
+
+        return $is_valid;
+    }
+
+    /**
      * Process an array of row objects and insert/update posts.
      *
      * @param array $rows Array of associative arrays representing wheel data.
@@ -458,11 +513,32 @@ class HP_WheelPros_Importer {
         $imported  = 0;
         $updated   = 0;
         $processed = array();
+        $skipped_no_image = 0;
+        $skipped_hidden_brand = 0;
+
         foreach ( $rows as $row ) {
             // Skip if no part number.
             if ( empty( $row['PartNumber'] ) ) {
                 continue;
             }
+
+            // Skip if no valid image URL - this is crucial for display
+            if ( empty( $row['ImageURL'] ) || ! $this->validate_image_url( $row['ImageURL'] ) ) {
+                $skipped_no_image++;
+                // Still track the part number as "processed" to avoid false positives in deactivation
+                $processed[] = trim( $row['PartNumber'] );
+                continue;
+            }
+
+            // Skip if brand is hidden - check BEFORE importing
+            if ( ! empty( $row['Brand'] ) && class_exists( 'HP_WheelPros_Brand_Manager' ) ) {
+                if ( ! HP_WheelPros_Brand_Manager::should_import_brand( $row['Brand'] ) ) {
+                    $skipped_hidden_brand++;
+                    $processed[] = trim( $row['PartNumber'] );
+                    continue;
+                }
+            }
+
             $part_number = trim( $row['PartNumber'] );
             $processed[] = $part_number;
             // Check if post exists by part number.
@@ -543,6 +619,24 @@ class HP_WheelPros_Importer {
                 wp_set_object_terms( $post_id, $finish, 'hp_finish', false );
             }
         }
+
+        // Log how many items were skipped due to missing/invalid images
+        if ( $skipped_no_image > 0 ) {
+            if ( ! empty( $this->progress_key ) ) {
+                $this->add_progress_message( sprintf( __( 'Skipped %d items with missing or invalid images (auto-validated)', 'wheelpros-importer' ), $skipped_no_image ) );
+            }
+            // Also log to error log for record keeping
+            error_log( sprintf( 'WheelPros Import: Skipped %d items with invalid images in this batch', $skipped_no_image ) );
+        }
+
+        // Log how many items were skipped due to hidden brands
+        if ( $skipped_hidden_brand > 0 ) {
+            if ( ! empty( $this->progress_key ) ) {
+                $this->add_progress_message( sprintf( __( 'Skipped %d items from hidden brands (see Brand Manager)', 'wheelpros-importer' ), $skipped_hidden_brand ) );
+            }
+            error_log( sprintf( 'WheelPros Import: Skipped %d items from hidden brands in this batch', $skipped_hidden_brand ) );
+        }
+
         return array( $imported, $updated, $processed );
     }
 

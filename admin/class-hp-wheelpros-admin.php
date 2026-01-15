@@ -46,6 +46,9 @@ class HP_WheelPros_Admin {
 
         // Broken image tracking
         add_action( 'wp_ajax_hp_mark_image_broken', array( $this, 'ajax_mark_image_broken' ) );
+
+        // Image validation utility
+        add_action( 'wp_ajax_hp_validate_wheel_images', array( $this, 'ajax_validate_wheel_images' ) );
     }
 
     /**
@@ -90,6 +93,10 @@ class HP_WheelPros_Admin {
     public function register_settings() {
         // Register a settings section for SFTP credentials and import options.
         register_setting( 'hp_wheelpros_settings', 'hp_wheelpros_options', array( $this, 'sanitize_options' ) );
+
+        // Register API credentials separately (they're not part of hp_wheelpros_options)
+        register_setting( 'hp_wheelpros_settings', 'wheelpros_api_username', 'sanitize_text_field' );
+        register_setting( 'hp_wheelpros_settings', 'wheelpros_api_password', array( $this, 'sanitize_api_password' ) );
 
         add_settings_section(
             'hp_wheelpros_sftp_section',
@@ -171,6 +178,32 @@ class HP_WheelPros_Admin {
             'hp-wheelpros-settings',
             'hp_wheelpros_contact_section'
         );
+
+        // WheelPros API section for vehicle search
+        add_settings_section(
+            'hp_wheelpros_api_section',
+            __( 'WheelPros API (Vehicle Search)', 'wheelpros-importer' ),
+            array( $this, 'render_api_section_description' ),
+            'hp-wheelpros-settings'
+        );
+
+        // API Username
+        add_settings_field(
+            'hp_api_username',
+            __( 'API Username', 'wheelpros-importer' ),
+            array( $this, 'render_api_username_field' ),
+            'hp-wheelpros-settings',
+            'hp_wheelpros_api_section'
+        );
+
+        // API Password
+        add_settings_field(
+            'hp_api_password',
+            __( 'API Password', 'wheelpros-importer' ),
+            array( $this, 'render_api_password_field' ),
+            'hp-wheelpros-settings',
+            'hp_wheelpros_api_section'
+        );
     }
 
     /**
@@ -240,6 +273,18 @@ class HP_WheelPros_Admin {
             $opts['quote_url'] = $url;
         }
         return $opts;
+    }
+
+    /**
+     * Sanitize API password
+     * Keep existing password if blank
+     */
+    public function sanitize_api_password( $input ) {
+        if ( empty( $input ) ) {
+            // Keep existing password
+            return get_option( 'wheelpros_api_password', '' );
+        }
+        return sanitize_text_field( wp_unslash( $input ) );
     }
 
     /* -----------------------------------------------------------------------
@@ -331,7 +376,43 @@ class HP_WheelPros_Admin {
     }
 
     /**
+     * Render API section description
+     */
+    public function render_api_section_description() {
+        echo '<p>';
+        esc_html_e( 'Configure your WheelPros API credentials for vehicle search functionality. These are different from your SFTP credentials above and are used for the vehicle fitment search feature.', 'wheelpros-importer' );
+        echo '</p>';
+    }
+
+    /**
+     * Render API username field
+     */
+    public function render_api_username_field() {
+        $value = get_option( 'wheelpros_api_username', '' );
+        printf( '<input type="text" name="wheelpros_api_username" value="%s" class="regular-text" />', esc_attr( $value ) );
+        echo '<p class="description">';
+        esc_html_e( 'Your WheelPros API username (not SFTP username).', 'wheelpros-importer' );
+        echo '</p>';
+    }
+
+    /**
+     * Render API password field
+     */
+    public function render_api_password_field() {
+        $value = get_option( 'wheelpros_api_password', '' );
+        // Show masked value if exists
+        $display_value = ! empty( $value ) ? '••••••••' : '';
+        printf( '<input type="password" name="wheelpros_api_password" value="" class="regular-text" placeholder="%s" autocomplete="new-password" />', esc_attr( $display_value ) );
+        echo '<p class="description">';
+        esc_html_e( 'Your WheelPros API password. Leave blank to keep current password.', 'wheelpros-importer' );
+        echo '</p>';
+    }
+
+    /**
      * Render the settings page.
+     */
+    /**
+     * Render settings page content.
      */
     public function render_settings_page() {
         if ( ! current_user_can( 'manage_options' ) ) {
@@ -610,6 +691,126 @@ class HP_WheelPros_Admin {
                 </table>
                 <?php submit_button( __( 'Import from File', 'wheelpros-importer' ), 'secondary', 'hp_manual_import' ); ?>
             </form>
+
+            <hr />
+            <h2><?php esc_html_e( 'Image Validation', 'wheelpros-importer' ); ?></h2>
+            <p><?php esc_html_e( 'Scan all published wheels and automatically hide those with missing or invalid images by converting them to draft status. This helps clean up your catalog and ensures only wheels with valid images are displayed to customers.', 'wheelpros-importer' ); ?></p>
+            <p class="description"><?php esc_html_e( 'Note: Images are automatically validated during import, so you only need to run this if you have older data or suspect issues.', 'wheelpros-importer' ); ?></p>
+            <?php $validate_nonce = wp_create_nonce( 'hp_validate_images' ); ?>
+            <button id="hp-validate-images" class="button button-secondary"><?php esc_html_e( 'Scan & Hide Wheels with Invalid Images', 'wheelpros-importer' ); ?></button>
+            <button id="hp-cancel-validation" class="button" style="display:none;"><?php esc_html_e( 'Cancel', 'wheelpros-importer' ); ?></button>
+            <div id="hp-validation-progress-wrapper" style="margin-top:15px; display:none; max-width:600px;">
+                <div style="background:#e5e5e5; height:20px; width:100%; border-radius:4px; overflow:hidden;">
+                    <div id="hp-validation-progress-bar" style="background:#f39c12; width:0%; height:100%; transition:width 0.5s;"></div>
+                </div>
+                <div id="hp-validation-progress-text" style="margin-top:5px; font-size:14px;"></div>
+                <div style="margin-top:10px;">
+                    <h4><?php echo esc_html( __( 'Validation Log', 'wheelpros-importer' ) ); ?></h4>
+                    <pre id="hp-validation-log" style="max-height:300px; overflow:auto; background:#f8f8f8; padding:10px; border:1px solid #ccc; white-space:pre-wrap;"></pre>
+                </div>
+            </div>
+            <script>
+            (function($){
+                var validationRunning = false;
+                var validationCancelled = false;
+
+                $('#hp-validate-images').on('click', function(e){
+                    e.preventDefault();
+                    var $btn = $(this);
+                    var $cancelBtn = $('#hp-cancel-validation');
+
+                    if (!confirm('This will scan all published wheels and hide those with missing or invalid images. Continue?')) {
+                        return;
+                    }
+
+                    validationRunning = true;
+                    validationCancelled = false;
+                    $btn.prop('disabled', true);
+                    $cancelBtn.show();
+                    $('#hp-validation-progress-wrapper').show();
+                    $('#hp-validation-progress-bar').css('width', '0%');
+                    $('#hp-validation-progress-text').text('<?php echo esc_js( __( 'Starting image validation...', 'wheelpros-importer' ) ); ?>');
+                    $('#hp-validation-log').text('🔍 Scanning for wheels with invalid images...\n');
+
+                    var offset = 0;
+                    var batchSize = 25;
+                    var totalHidden = 0;
+                    var totalScanned = 0;
+
+                    function validateBatch(){
+                        if (validationCancelled) {
+                            $('#hp-validation-progress-text').text('⚠️ Validation cancelled by user');
+                            $('#hp-validation-log').append('\n⚠️ Validation cancelled. Scanned: ' + totalScanned + ', Hidden: ' + totalHidden + '\n');
+                            $btn.prop('disabled', false);
+                            $cancelBtn.hide();
+                            validationRunning = false;
+                            return;
+                        }
+
+                        $.post(ajaxurl, {
+                            action: 'hp_validate_wheel_images',
+                            nonce: '<?php echo $validate_nonce; ?>',
+                            offset: offset,
+                            batch_size: batchSize
+                        }, function(resp){
+                            if (resp.success) {
+                                totalScanned += resp.data.processed;
+                                totalHidden += resp.data.hidden;
+
+                                var progress = ((resp.data.offset / resp.data.total) * 100).toFixed(1);
+                                $('#hp-validation-progress-bar').css('width', progress + '%');
+                                $('#hp-validation-progress-text').text(progress + '% complete (' + totalScanned + '/' + resp.data.total + ' scanned, ' + totalHidden + ' hidden)');
+
+                                // Add log messages
+                                if (resp.data.log && Array.isArray(resp.data.log)) {
+                                    resp.data.log.forEach(function(msg){
+                                        $('#hp-validation-log').append(msg + '\n');
+                                    });
+                                    var logEl = document.getElementById('hp-validation-log');
+                                    logEl.scrollTop = logEl.scrollHeight;
+                                }
+
+                                if (resp.data.complete) {
+                                    $('#hp-validation-progress-text').text('✅ Validation complete! Scanned: ' + totalScanned + ', Hidden: ' + totalHidden);
+                                    $('#hp-validation-log').append('\n🎉 Validation finished!\n');
+                                    $('#hp-validation-log').append('📊 Total wheels scanned: ' + totalScanned + '\n');
+                                    $('#hp-validation-log').append('❌ Wheels hidden (invalid images): ' + totalHidden + '\n');
+                                    $btn.prop('disabled', false);
+                                    $cancelBtn.hide();
+                                    validationRunning = false;
+                                    alert('Image validation completed! ' + totalHidden + ' wheels with invalid images have been hidden.');
+                                } else {
+                                    offset = resp.data.offset;
+                                    setTimeout(validateBatch, 500); // Small delay to avoid overwhelming server
+                                }
+                            } else {
+                                $('#hp-validation-progress-text').text('❌ Validation failed: ' + resp.data);
+                                $('#hp-validation-log').append('❌ Error: ' + resp.data + '\n');
+                                $btn.prop('disabled', false);
+                                $cancelBtn.hide();
+                                validationRunning = false;
+                                alert('Validation failed: ' + resp.data);
+                            }
+                        }).fail(function(xhr, status, error){
+                            $('#hp-validation-progress-text').text('❌ Network error occurred');
+                            $('#hp-validation-log').append('❌ Network error: ' + error + '\n');
+                            $btn.prop('disabled', false);
+                            $cancelBtn.hide();
+                            validationRunning = false;
+                            alert('Network error occurred during validation');
+                        });
+                    }
+
+                    validateBatch();
+                });
+
+                $('#hp-cancel-validation').on('click', function() {
+                    if (validationRunning && confirm('Are you sure you want to cancel the validation process?')) {
+                        validationCancelled = true;
+                    }
+                });
+            })(jQuery);
+            </script>
 
             <hr />
             <h2><?php esc_html_e( 'Maintenance Actions', 'wheelpros-importer' ); ?></h2>
@@ -1105,6 +1306,14 @@ class HP_WheelPros_Admin {
                     continue;
                 }
 
+                // Check if brand is hidden - skip hidden brands during import
+                $brand = isset( $item['Brand'] ) ? trim( $item['Brand'] ) : '';
+                if ( ! empty( $brand ) && class_exists( 'HP_WheelPros_Brand_Manager' ) ) {
+                    if ( ! HP_WheelPros_Brand_Manager::should_import_brand( $brand ) ) {
+                        continue; // Skip hidden brands silently
+                    }
+                }
+
                 // Check if exists
                 $post_id = isset( $existing_map[ $part_number ] ) ? $existing_map[ $part_number ] : 0;
 
@@ -1359,6 +1568,121 @@ class HP_WheelPros_Admin {
         wp_send_json_success( array(
             'message' => 'Image marked as broken',
             'image_url' => $image_url
+        ) );
+    }
+
+    /**
+     * AJAX handler to validate wheel images in batches.
+     * Checks if images are valid and marks wheels with invalid images as draft.
+     */
+    public function ajax_validate_wheel_images() {
+        // Verify nonce
+        if ( ! wp_verify_nonce( $_POST['nonce'], 'hp_validate_images' ) ) {
+            wp_send_json_error( 'Invalid nonce' );
+        }
+
+        $offset = isset( $_POST['offset'] ) ? absint( $_POST['offset'] ) : 0;
+        $batch_size = isset( $_POST['batch_size'] ) ? absint( $_POST['batch_size'] ) : 25;
+
+        // Get total count
+        $args = array(
+            'post_type'      => 'hp_wheel',
+            'post_status'    => 'publish',
+            'posts_per_page' => -1,
+            'fields'         => 'ids',
+        );
+        $all_ids = get_posts( $args );
+        $total = count( $all_ids );
+
+        // Get batch of posts
+        $batch_args = array(
+            'post_type'      => 'hp_wheel',
+            'post_status'    => 'publish',
+            'posts_per_page' => $batch_size,
+            'offset'         => $offset,
+            'orderby'        => 'ID',
+            'order'          => 'ASC',
+        );
+        $posts = get_posts( $batch_args );
+
+        $hidden = 0;
+        $log = array();
+
+        foreach ( $posts as $post ) {
+            $image_url = get_post_meta( $post->ID, 'hp_image_url', true );
+            $part_number = get_post_meta( $post->ID, 'hp_part_number', true );
+
+            // Check if image URL is empty or invalid
+            $is_invalid = false;
+            $reason = '';
+
+            if ( empty( $image_url ) ) {
+                $is_invalid = true;
+                $reason = 'No image URL';
+            } elseif ( ! filter_var( $image_url, FILTER_VALIDATE_URL ) ) {
+                $is_invalid = true;
+                $reason = 'Invalid URL format';
+            } elseif ( strpos( $image_url, 'localhost' ) !== false ||
+                       strpos( $image_url, 'placeholder' ) !== false ||
+                       strpos( $image_url, 'example.com' ) !== false ) {
+                $is_invalid = true;
+                $reason = 'Placeholder URL';
+            } else {
+                // Check if URL is accessible (HEAD request)
+                $response = wp_remote_head( $image_url, array(
+                    'timeout'     => 5,
+                    'redirection' => 3,
+                ) );
+
+                if ( is_wp_error( $response ) ) {
+                    $is_invalid = true;
+                    $reason = 'Network error: ' . $response->get_error_message();
+                } else {
+                    $status_code = wp_remote_retrieve_response_code( $response );
+                    $content_type = wp_remote_retrieve_header( $response, 'content-type' );
+
+                    if ( $status_code !== 200 ) {
+                        $is_invalid = true;
+                        $reason = 'HTTP ' . $status_code;
+                    } elseif ( strpos( $content_type, 'image/' ) !== 0 ) {
+                        $is_invalid = true;
+                        $reason = 'Not an image (Content-Type: ' . $content_type . ')';
+                    }
+                }
+            }
+
+            if ( $is_invalid ) {
+                // Convert to draft
+                wp_update_post( array(
+                    'ID'          => $post->ID,
+                    'post_status' => 'draft',
+                ) );
+                $hidden++;
+
+                // Add to broken images cache
+                $broken_images = wp_cache_get( 'hp_broken_images_list' );
+                if ( $broken_images === false ) {
+                    $broken_images = array();
+                }
+                if ( ! in_array( $image_url, $broken_images ) ) {
+                    $broken_images[] = $image_url;
+                    wp_cache_set( 'hp_broken_images_list', $broken_images, '', 3600 );
+                }
+
+                $log[] = sprintf( '❌ Hidden: %s - %s', $part_number, $reason );
+            }
+        }
+
+        $new_offset = $offset + $batch_size;
+        $complete = $new_offset >= $total;
+
+        wp_send_json_success( array(
+            'offset'    => $new_offset,
+            'total'     => $total,
+            'processed' => count( $posts ),
+            'hidden'    => $hidden,
+            'complete'  => $complete,
+            'log'       => $log,
         ) );
     }
 }

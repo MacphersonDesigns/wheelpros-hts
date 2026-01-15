@@ -11,12 +11,19 @@ class HP_WheelPros_Shortcodes {
      * Register shortcode hooks and AJAX handlers.
      */
     public static function register() {
+        // DEBUG: Log registration
+        error_log( 'HP_WHEELS: Shortcodes::register() called at ' . date('Y-m-d H:i:s') );
+
         // Register shortcodes.
         add_shortcode( 'hp_wheels', array( __CLASS__, 'render_wheels_shortcode' ) );
 
         // Register AJAX handlers for wheel variations modal.
         add_action( 'wp_ajax_hp_get_wheel_variations', array( __CLASS__, 'ajax_get_wheel_variations' ) );
         add_action( 'wp_ajax_nopriv_hp_get_wheel_variations', array( __CLASS__, 'ajax_get_wheel_variations' ) );
+
+        // Register AJAX handlers for cascading filter options.
+        add_action( 'wp_ajax_hp_get_filter_options', array( __CLASS__, 'ajax_get_filter_options' ) );
+        add_action( 'wp_ajax_nopriv_hp_get_filter_options', array( __CLASS__, 'ajax_get_filter_options' ) );
     }
 
     /**
@@ -28,11 +35,13 @@ class HP_WheelPros_Shortcodes {
             wp_send_json_error( 'Invalid nonce' );
         }
 
-        $display_style_no = sanitize_text_field( $_POST['style_slug'] );
+        // style_slug can be either DisplayStyleNo or Style name depending on what's available
+        $style_slug = sanitize_text_field( $_POST['style_slug'] ?? '' );
+        $style_name = sanitize_text_field( $_POST['style_name'] ?? '' );
         $brand_name = sanitize_text_field( $_POST['brand_name'] ?? '' );
 
-        if ( empty( $display_style_no ) ) {
-            wp_send_json_error( 'Display style number required' );
+        if ( empty( $style_slug ) && empty( $style_name ) ) {
+            wp_send_json_error( 'Style identifier required' );
         }
 
         global $wpdb;
@@ -41,7 +50,17 @@ class HP_WheelPros_Shortcodes {
         $broken_images = wp_cache_get( 'hp_broken_images_list' );
         $broken_where_clause = '';
         $brand_where_clause = '';
-        $params = array( $display_style_no );
+        $style_where_clause = '';
+        $params = array();
+
+        // Filter by Style name (preferred) or DisplayStyleNo (fallback)
+        if ( ! empty( $style_name ) ) {
+            $style_where_clause = " AND pm_style.meta_value = %s";
+            $params[] = $style_name;
+        } elseif ( ! empty( $style_slug ) ) {
+            $style_where_clause = " AND pm_display.meta_value = %s";
+            $params[] = $style_slug;
+        }
 
         // Add brand filter if provided
         if ( ! empty( $brand_name ) ) {
@@ -55,7 +74,13 @@ class HP_WheelPros_Shortcodes {
             $params = array_merge( $params, $broken_images );
         }
 
-        // Get all wheels for this DisplayStyleNo and Brand with images only (excluding broken ones)
+        // Also exclude obviously invalid image URLs
+        $broken_where_clause .= " AND pm_image.meta_value NOT LIKE '%localhost%'";
+        $broken_where_clause .= " AND pm_image.meta_value NOT LIKE '%placeholder%'";
+        $broken_where_clause .= " AND pm_image.meta_value NOT LIKE '%example.com%'";
+        $broken_where_clause .= " AND pm_image.meta_value LIKE 'http%'"; // Must start with http or https
+
+        // Get all wheels for this Style (or DisplayStyleNo) and Brand with images only (excluding broken ones)
         $sql = "SELECT p.ID,
                    pm_image.meta_value as image_url,
                    pm_part.meta_value as part_number,
@@ -69,8 +94,9 @@ class HP_WheelPros_Shortcodes {
                    pm_load.meta_value as load_rating,
                    pm_qoh.meta_value as qoh
             FROM {$wpdb->posts} p
-            INNER JOIN {$wpdb->postmeta} pm_display ON p.ID = pm_display.post_id AND pm_display.meta_key = 'hp_display_style_no' AND pm_display.meta_value = %s
+            INNER JOIN {$wpdb->postmeta} pm_display ON p.ID = pm_display.post_id AND pm_display.meta_key = 'hp_display_style_no'
             INNER JOIN {$wpdb->postmeta} pm_image ON p.ID = pm_image.post_id AND pm_image.meta_key = 'hp_image_url' AND pm_image.meta_value != '' AND pm_image.meta_value IS NOT NULL{$broken_where_clause}
+            LEFT JOIN {$wpdb->postmeta} pm_style ON p.ID = pm_style.post_id AND pm_style.meta_key = 'hp_style'
             LEFT JOIN {$wpdb->postmeta} pm_part ON p.ID = pm_part.post_id AND pm_part.meta_key = 'hp_part_number'
             LEFT JOIN {$wpdb->postmeta} pm_desc ON p.ID = pm_desc.post_id AND pm_desc.meta_key = 'hp_part_description'
             LEFT JOIN {$wpdb->postmeta} pm_size ON p.ID = pm_size.post_id AND pm_size.meta_key = 'hp_size'
@@ -81,7 +107,7 @@ class HP_WheelPros_Shortcodes {
             LEFT JOIN {$wpdb->postmeta} pm_bore ON p.ID = pm_bore.post_id AND pm_bore.meta_key = 'hp_center_bore'
             LEFT JOIN {$wpdb->postmeta} pm_load ON p.ID = pm_load.post_id AND pm_load.meta_key = 'hp_load_rating'
             LEFT JOIN {$wpdb->postmeta} pm_qoh ON p.ID = pm_qoh.post_id AND pm_qoh.meta_key = 'hp_total_qoh'
-            WHERE p.post_type = 'hp_wheel' AND p.post_status = 'publish'{$brand_where_clause}
+            WHERE p.post_type = 'hp_wheel' AND p.post_status = 'publish'{$style_where_clause}{$brand_where_clause}
             ORDER BY pm_part.meta_value ASC";
 
         $wheels = $wpdb->get_results( $wpdb->prepare( $sql, $params ) );
@@ -207,7 +233,7 @@ class HP_WheelPros_Shortcodes {
                 if (imageElement && wheelData.image_url) {
                     // Add loading state
                     imageElement.style.opacity = '0.5';
-                    
+
                     // Create a new image to test if it loads successfully
                     const newImage = new Image();
                     newImage.onload = function() {
@@ -265,6 +291,9 @@ class HP_WheelPros_Shortcodes {
      * @return string
      */
     public static function render_wheels_shortcode( $atts ) {
+        // DEBUG: Log that shortcode is being called
+        error_log( 'HP_WHEELS SHORTCODE: render_wheels_shortcode() called' );
+
         // Sanitize filter query variables.
         $brand       = isset( $_GET['brand'] ) ? sanitize_text_field( wp_unslash( $_GET['brand'] ) ) : '';
         $finish      = isset( $_GET['finish'] ) ? sanitize_text_field( wp_unslash( $_GET['finish'] ) ) : '';
@@ -283,14 +312,16 @@ class HP_WheelPros_Shortcodes {
         $display_style_groups = wp_cache_get( $cache_key );
 
         if ( false === $display_style_groups ) {
-            // Build optimized SQL query - group by display style AND brand to prevent mixing different wheel types
+            // Build optimized SQL query - group by Style name AND brand to prevent mixing different wheel designs
+            // Using Style (hp_style) instead of DisplayStyleNo because Style better identifies the actual wheel design
+            // e.g., "U117 RAMBLER" vs "PR117" vs "FF117" which may share the same DisplayStyleNo "117"
             $sql = "SELECT
                         pm_display.meta_value as display_style_no,
                         MIN(pm_image.meta_value) as image_url,
                         GROUP_CONCAT(DISTINCT p.ID) as wheel_ids,
                         COUNT(p.ID) as variation_count,
-                        MAX(pm_style.meta_value) as style_name,
-                        MAX(pm_brand.meta_value) as brand_name,
+                        COALESCE(pm_style.meta_value, pm_display.meta_value) as style_name,
+                        COALESCE(pm_brand.meta_value, 'Unknown') as brand_name,
                         MAX(pm_desc.meta_value) as part_description
                     FROM {$wpdb->posts} p
                     INNER JOIN {$wpdb->postmeta} pm_display ON p.ID = pm_display.post_id AND pm_display.meta_key = 'hp_display_style_no'
@@ -309,6 +340,20 @@ class HP_WheelPros_Shortcodes {
                 $placeholders = implode( ',', array_fill( 0, count( $broken_images ), '%s' ) );
                 $where_conditions[] = "pm_image.meta_value NOT IN ($placeholders)";
                 $values = array_merge( $values, $broken_images );
+            }
+
+            // Also exclude obviously invalid URLs (placeholders, localhost, etc.)
+            $where_conditions[] = "pm_image.meta_value NOT LIKE '%localhost%'";
+            $where_conditions[] = "pm_image.meta_value NOT LIKE '%placeholder%'";
+            $where_conditions[] = "pm_image.meta_value NOT LIKE '%example.com%'";
+            $where_conditions[] = "pm_image.meta_value LIKE 'http%'"; // Must start with http or https
+
+            // Exclude hidden brands using centralized method
+            if ( class_exists( 'HP_WheelPros_Brand_Manager' ) ) {
+                $hidden_filter = HP_WheelPros_Brand_Manager::get_hidden_brands_sql_filter( false );
+                if ( ! empty( $hidden_filter ) ) {
+                    $where_conditions[] = $hidden_filter;
+                }
             }
 
             // Add filter conditions
@@ -338,14 +383,25 @@ class HP_WheelPros_Shortcodes {
             }
 
             $sql .= ' WHERE ' . implode( ' AND ', $where_conditions );
-            $sql .= ' GROUP BY pm_display.meta_value, pm_brand.meta_value';
-            $sql .= ' ORDER BY pm_brand.meta_value ASC, display_style_no ASC';
+            // Group by Style name AND brand to separate different wheel designs
+            // This prevents mixing wheels like "U117 RAMBLER" with "PR117" that share DisplayStyleNo
+            // Use COALESCE to handle NULL style values by falling back to display_style_no
+            $sql .= ' GROUP BY COALESCE(pm_style.meta_value, pm_display.meta_value), COALESCE(pm_brand.meta_value, "Unknown")';
+            $sql .= ' ORDER BY pm_brand.meta_value ASC, COALESCE(pm_style.meta_value, pm_display.meta_value) ASC';
 
             if ( ! empty( $values ) ) {
                 $sql = $wpdb->prepare( $sql, $values );
             }
 
             $display_style_groups = $wpdb->get_results( $sql );
+
+            // DEBUG: Log SQL query and results
+            error_log( 'HP_WHEELS SHORTCODE: SQL Query = ' . $sql );
+            error_log( 'HP_WHEELS SHORTCODE: Results count = ' . count( $display_style_groups ) );
+            if ( $wpdb->last_error ) {
+                error_log( 'HP_WHEELS SHORTCODE: SQL Error = ' . $wpdb->last_error );
+            }
+
             wp_cache_set( $cache_key, $display_style_groups, '', 300 ); // Cache for 5 minutes
         }
 
@@ -366,15 +422,37 @@ class HP_WheelPros_Shortcodes {
 
         // For filter dropdowns, gather available values (cached)
         $filter_cache_key = 'hp_wheel_filter_options';
+        
+        // TEMPORARY: Force cache clear to debug brand issue
+        wp_cache_delete( $filter_cache_key );
+        
         $filter_options = wp_cache_get( $filter_cache_key );
 
         if ( false === $filter_options ) {
+            // Get visible brands directly (can't use Brand Manager class on frontend)
+            $hidden_brands = get_option( 'hp_hidden_brands', array() );
+            $brand_query = "SELECT DISTINCT pm.meta_value
+                           FROM {$wpdb->postmeta} pm
+                           INNER JOIN {$wpdb->posts} p ON pm.post_id = p.ID
+                           WHERE pm.meta_key = 'hp_brand'
+                           AND pm.meta_value != ''
+                           AND p.post_type = 'hp_wheel'
+                           AND p.post_status = 'publish'";
+            
+            if ( ! empty( $hidden_brands ) ) {
+                $placeholders = implode( ',', array_fill( 0, count( $hidden_brands ), '%s' ) );
+                $brand_query = $wpdb->prepare( $brand_query . " AND pm.meta_value NOT IN ($placeholders)", ...$hidden_brands );
+            }
+            
+            $brand_query .= " ORDER BY pm.meta_value";
+            $brands = $wpdb->get_col( $brand_query );
+
             $filter_options = array(
-                'brands' => $wpdb->get_col( "SELECT DISTINCT meta_value FROM {$wpdb->postmeta} WHERE meta_key = 'hp_brand' AND meta_value != '' ORDER BY meta_value" ),
-                'finishes' => $wpdb->get_col( "SELECT DISTINCT meta_value FROM {$wpdb->postmeta} WHERE meta_key = 'hp_finish' AND meta_value != '' ORDER BY meta_value" ),
-                'sizes' => $wpdb->get_col( "SELECT DISTINCT meta_value FROM {$wpdb->postmeta} WHERE meta_key = 'hp_size' AND meta_value != '' ORDER BY meta_value" ),
-                'bolt_patterns' => $wpdb->get_col( "SELECT DISTINCT meta_value FROM {$wpdb->postmeta} WHERE meta_key = 'hp_bolt_pattern' AND meta_value != '' ORDER BY meta_value" ),
-                'styles' => $wpdb->get_col( "SELECT DISTINCT meta_value FROM {$wpdb->postmeta} WHERE meta_key = 'hp_style' AND meta_value != '' ORDER BY meta_value" )
+                'brands' => $brands,
+                'finishes' => $wpdb->get_col( "SELECT DISTINCT pm.meta_value FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON pm.post_id = p.ID WHERE pm.meta_key = 'hp_finish' AND pm.meta_value != '' AND p.post_type = 'hp_wheel' AND p.post_status = 'publish' ORDER BY pm.meta_value" ),
+                'sizes' => $wpdb->get_col( "SELECT DISTINCT pm.meta_value FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON pm.post_id = p.ID WHERE pm.meta_key = 'hp_size' AND pm.meta_value != '' AND p.post_type = 'hp_wheel' AND p.post_status = 'publish' ORDER BY pm.meta_value" ),
+                'bolt_patterns' => $wpdb->get_col( "SELECT DISTINCT pm.meta_value FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON pm.post_id = p.ID WHERE pm.meta_key = 'hp_bolt_pattern' AND pm.meta_value != '' AND p.post_type = 'hp_wheel' AND p.post_status = 'publish' ORDER BY pm.meta_value" ),
+                'styles' => $wpdb->get_col( "SELECT DISTINCT pm.meta_value FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON pm.post_id = p.ID WHERE pm.meta_key = 'hp_style' AND pm.meta_value != '' AND p.post_type = 'hp_wheel' AND p.post_status = 'publish' ORDER BY pm.meta_value" )
             );
             wp_cache_set( $filter_cache_key, $filter_options, '', 900 ); // Cache for 15 minutes
         }
@@ -384,7 +462,7 @@ class HP_WheelPros_Shortcodes {
         <form method="get" class="hp-wheels-filter" action="" style="margin-bottom:2em; padding:20px; background:#f8f9fa; border-radius:8px; display:flex; flex-wrap:wrap; gap:15px; align-items:end;">
             <div style="flex:1; min-width:180px;">
                 <label style="display:block; margin-bottom:5px; font-weight:600; color:#2c3e50; font-size:0.9em;"><?php esc_html_e( 'Brand', 'wheelpros-importer' ); ?></label>
-                <select name="brand" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; font-size:0.9em; background:#fff;">
+                <select name="brand" id="hp-filter-brand" class="hp-filter-select" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; font-size:0.9em; background:#fff;">
                     <option value=""><?php esc_html_e( 'All Brands', 'wheelpros-importer' ); ?></option>
                     <?php foreach ( $filter_options['brands'] as $brand_option ) : ?>
                         <option value="<?php echo esc_attr( $brand_option ); ?>" <?php selected( $brand, $brand_option ); ?>><?php echo esc_html( $brand_option ); ?></option>
@@ -393,7 +471,7 @@ class HP_WheelPros_Shortcodes {
             </div>
             <div style="flex:1; min-width:180px;">
                 <label style="display:block; margin-bottom:5px; font-weight:600; color:#2c3e50; font-size:0.9em;"><?php esc_html_e( 'Finish', 'wheelpros-importer' ); ?></label>
-                <select name="finish" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; font-size:0.9em; background:#fff;">
+                <select name="finish" id="hp-filter-finish" class="hp-filter-select" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; font-size:0.9em; background:#fff;">
                     <option value=""><?php esc_html_e( 'All Finishes', 'wheelpros-importer' ); ?></option>
                     <?php foreach ( $filter_options['finishes'] as $finish_option ) : ?>
                         <option value="<?php echo esc_attr( $finish_option ); ?>" <?php selected( $finish, $finish_option ); ?>><?php echo esc_html( $finish_option ); ?></option>
@@ -402,7 +480,7 @@ class HP_WheelPros_Shortcodes {
             </div>
             <div style="flex:1; min-width:180px;">
                 <label style="display:block; margin-bottom:5px; font-weight:600; color:#2c3e50; font-size:0.9em;"><?php esc_html_e( 'Size', 'wheelpros-importer' ); ?></label>
-                <select name="size" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; font-size:0.9em; background:#fff;">
+                <select name="size" id="hp-filter-size" class="hp-filter-select" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; font-size:0.9em; background:#fff;">
                     <option value=""><?php esc_html_e( 'All Sizes', 'wheelpros-importer' ); ?></option>
                     <?php foreach ( $filter_options['sizes'] as $size_option ) : ?>
                         <option value="<?php echo esc_attr( $size_option ); ?>" <?php selected( $size, $size_option ); ?>><?php echo esc_html( $size_option ); ?></option>
@@ -411,7 +489,7 @@ class HP_WheelPros_Shortcodes {
             </div>
             <div style="flex:1; min-width:180px;">
                 <label style="display:block; margin-bottom:5px; font-weight:600; color:#2c3e50; font-size:0.9em;"><?php esc_html_e( 'Bolt Pattern', 'wheelpros-importer' ); ?></label>
-                <select name="bolt_pattern" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; font-size:0.9em; background:#fff;">
+                <select name="bolt_pattern" id="hp-filter-bolt-pattern" class="hp-filter-select" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; font-size:0.9em; background:#fff;">
                     <option value=""><?php esc_html_e( 'All Bolt Patterns', 'wheelpros-importer' ); ?></option>
                     <?php foreach ( $filter_options['bolt_patterns'] as $bolt_option ) : ?>
                         <option value="<?php echo esc_attr( $bolt_option ); ?>" <?php selected( $bolt_pattern, $bolt_option ); ?>><?php echo esc_html( $bolt_option ); ?></option>
@@ -420,7 +498,7 @@ class HP_WheelPros_Shortcodes {
             </div>
             <div style="flex:1; min-width:180px;">
                 <label style="display:block; margin-bottom:5px; font-weight:600; color:#2c3e50; font-size:0.9em;"><?php esc_html_e( 'Style', 'wheelpros-importer' ); ?></label>
-                <select name="style" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; font-size:0.9em; background:#fff;">
+                <select name="style" id="hp-filter-style" class="hp-filter-select" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; font-size:0.9em; background:#fff;">
                     <option value=""><?php esc_html_e( 'All Styles', 'wheelpros-importer' ); ?></option>
                     <?php foreach ( $filter_options['styles'] as $style_option ) : ?>
                         <option value="<?php echo esc_attr( $style_option ); ?>" <?php selected( $style, $style_option ); ?>><?php echo esc_html( $style_option ); ?></option>
@@ -432,6 +510,67 @@ class HP_WheelPros_Shortcodes {
                 <button type="button" onclick="window.location.href='<?php echo esc_url( strtok( $_SERVER['REQUEST_URI'], '?' ) ); ?>'" style="padding:10px 20px; background:#6c757d; color:#fff; border:none; border-radius:6px; font-size:0.9em; font-weight:600; cursor:pointer; transition:background 0.3s ease;" onmouseover="this.style.background='#5a6268'" onmouseout="this.style.background='#6c757d'"><?php esc_html_e( 'Reset Filters', 'wheelpros-importer' ); ?></button>
             </div>
         </form>
+
+        <script>
+        jQuery(document).ready(function($) {
+            // Cascading filter functionality
+            $('.hp-filter-select').on('change', function() {
+                updateAvailableOptions();
+            });
+
+            function updateAvailableOptions() {
+                var $brand = $('#hp-filter-brand');
+                var $finish = $('#hp-filter-finish');
+                var $size = $('#hp-filter-size');
+                var $boltPattern = $('#hp-filter-bolt-pattern');
+                var $style = $('#hp-filter-style');
+
+                // Show loading state
+                $('.hp-filter-select').not($(this)).prop('disabled', true).css('opacity', '0.6');
+
+                $.ajax({
+                    url: '<?php echo admin_url( 'admin-ajax.php' ); ?>',
+                    method: 'POST',
+                    data: {
+                        action: 'hp_get_filter_options',
+                        brand: $brand.val(),
+                        finish: $finish.val(),
+                        size: $size.val(),
+                        bolt_pattern: $boltPattern.val(),
+                        style: $style.val()
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            // Update each dropdown with only available options
+                            updateDropdown($finish, response.data.finishes, 'All Finishes');
+                            updateDropdown($size, response.data.sizes, 'All Sizes');
+                            updateDropdown($boltPattern, response.data.bolt_patterns, 'All Bolt Patterns');
+                            updateDropdown($style, response.data.styles, 'All Styles');
+                        }
+                    },
+                    complete: function() {
+                        $('.hp-filter-select').prop('disabled', false).css('opacity', '1');
+                    }
+                });
+            }
+
+            function updateDropdown($select, options, allText) {
+                var currentValue = $select.val();
+                var $options = $('<option value="">' + allText + '</option>');
+
+                $.each(options, function(i, option) {
+                    $options = $options.add($('<option></option>').attr('value', option).text(option));
+                });
+
+                $select.html($options);
+
+                // Restore previous selection if still available
+                if (currentValue && options.indexOf(currentValue) !== -1) {
+                    $select.val(currentValue);
+                }
+            }
+        });
+        </script>
 
         <?php if ( ! empty( $paginated_groups ) ) : ?>
             <div class="hp-wheels-grid">
@@ -494,7 +633,7 @@ class HP_WheelPros_Shortcodes {
                         </div>
 
                         <div class="hp-wheel-actions" style="display:flex; flex-direction:column; gap:8px;">
-                            <a href="#" class="hp-view-variations" data-style="<?php echo esc_attr( $group->display_style_no ); ?>" data-brand="<?php echo esc_attr( $group->brand_name ); ?>" data-style-name="<?php echo esc_attr( $group_title ); ?>" style="display:block; padding:12px 16px; background:#2c3e50; color:#fff; border-radius:6px; text-decoration:none; font-size:0.85em; font-weight:600; transition:background 0.3s ease; text-align:center;" onmouseover="this.style.background='#34495e'" onmouseout="this.style.background='#2c3e50'">
+                            <a href="#" class="hp-view-variations" data-style="<?php echo esc_attr( $group->display_style_no ); ?>" data-style-name-filter="<?php echo esc_attr( $group->style_name ); ?>" data-brand="<?php echo esc_attr( $group->brand_name ); ?>" data-style-name="<?php echo esc_attr( $group_title ); ?>" style="display:block; padding:12px 16px; background:#2c3e50; color:#fff; border-radius:6px; text-decoration:none; font-size:0.85em; font-weight:600; transition:background 0.3s ease; text-align:center;" onmouseover="this.style.background='#34495e'" onmouseout="this.style.background='#2c3e50'">
                                 <?php esc_html_e( 'View All Options', 'wheelpros-importer' ); ?>
                             </a>
                             <?php if ( $call_phone ) : ?>
@@ -568,8 +707,9 @@ class HP_WheelPros_Shortcodes {
                 btn.addEventListener('click', function(e){
                     e.preventDefault();
                     const styleSlug = this.getAttribute('data-style');
+                    const styleNameFilter = this.getAttribute('data-style-name-filter'); // Actual style name for filtering
                     const brandName = this.getAttribute('data-brand');
-                    const styleName = this.getAttribute('data-style-name');
+                    const styleName = this.getAttribute('data-style-name'); // Display title
 
                     modalTitle.textContent = styleName + ' - All Options';
                     modalContent.innerHTML = '<div style="text-align:center; padding:40px;"><div style="display:inline-block; width:40px; height:40px; border:4px solid #f3f3f3; border-top:4px solid #3498db; border-radius:50%; animation:spin 1s linear infinite;"></div><p style="margin-top:15px; color:#666;">Loading variations...</p></div>';
@@ -579,6 +719,7 @@ class HP_WheelPros_Shortcodes {
                     const formData = new FormData();
                     formData.append('action', 'hp_get_wheel_variations');
                     formData.append('style_slug', styleSlug);
+                    formData.append('style_name', styleNameFilter); // Use style name for better filtering
                     formData.append('brand_name', brandName);
                     formData.append('nonce', '<?php echo wp_create_nonce( "hp_wheel_variations" ); ?>');
 
@@ -713,5 +854,104 @@ class HP_WheelPros_Shortcodes {
         </style>
         <?php
         return ob_get_clean();
+    }
+
+    /**
+     * AJAX handler for getting available filter options based on current selections
+     */
+    public static function ajax_get_filter_options() {
+        global $wpdb;
+
+        // Get current filter values
+        $brand = sanitize_text_field( $_POST['brand'] ?? '' );
+        $finish = sanitize_text_field( $_POST['finish'] ?? '' );
+        $size = sanitize_text_field( $_POST['size'] ?? '' );
+        $bolt_pattern = sanitize_text_field( $_POST['bolt_pattern'] ?? '' );
+        $style = sanitize_text_field( $_POST['style'] ?? '' );
+
+        // Build WHERE conditions based on selected filters
+        $where_conditions = array( "p.post_type = 'hp_wheel'", "p.post_status = 'publish'" );
+        $join_conditions = array();
+
+        // Add hidden brands filter
+        if ( class_exists( 'HP_WheelPros_Brand_Manager' ) ) {
+            $hidden_filter = HP_WheelPros_Brand_Manager::get_hidden_brands_sql_filter( false );
+            if ( ! empty( $hidden_filter ) ) {
+                $where_conditions[] = $hidden_filter;
+            }
+        }
+
+        // Add active filters as JOINs
+        if ( $brand ) {
+            $join_conditions[] = $wpdb->prepare(
+                "INNER JOIN {$wpdb->postmeta} pm_brand ON p.ID = pm_brand.post_id AND pm_brand.meta_key = 'hp_brand' AND pm_brand.meta_value = %s",
+                $brand
+            );
+        }
+        if ( $finish ) {
+            $join_conditions[] = $wpdb->prepare(
+                "INNER JOIN {$wpdb->postmeta} pm_finish ON p.ID = pm_finish.post_id AND pm_finish.meta_key = 'hp_finish' AND pm_finish.meta_value = %s",
+                $finish
+            );
+        }
+        if ( $size ) {
+            $join_conditions[] = $wpdb->prepare(
+                "INNER JOIN {$wpdb->postmeta} pm_size ON p.ID = pm_size.post_id AND pm_size.meta_key = 'hp_size' AND pm_size.meta_value = %s",
+                $size
+            );
+        }
+        if ( $bolt_pattern ) {
+            $join_conditions[] = $wpdb->prepare(
+                "INNER JOIN {$wpdb->postmeta} pm_bolt ON p.ID = pm_bolt.post_id AND pm_bolt.meta_key = 'hp_bolt_pattern' AND pm_bolt.meta_value = %s",
+                $bolt_pattern
+            );
+        }
+        if ( $style ) {
+            $join_conditions[] = $wpdb->prepare(
+                "INNER JOIN {$wpdb->postmeta} pm_style ON p.ID = pm_style.post_id AND pm_style.meta_key = 'hp_style' AND pm_style.meta_value = %s",
+                $style
+            );
+        }
+
+        $joins = ! empty( $join_conditions ) ? implode( ' ', $join_conditions ) : '';
+        $where = 'WHERE ' . implode( ' AND ', $where_conditions );
+
+        // Get available options for each filter based on current selections
+        $options = array(
+            'finishes' => $wpdb->get_col( 
+                "SELECT DISTINCT pm.meta_value 
+                 FROM {$wpdb->posts} p 
+                 {$joins}
+                 INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = 'hp_finish' 
+                 {$where} AND pm.meta_value != '' 
+                 ORDER BY pm.meta_value" 
+            ),
+            'sizes' => $wpdb->get_col( 
+                "SELECT DISTINCT pm.meta_value 
+                 FROM {$wpdb->posts} p 
+                 {$joins}
+                 INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = 'hp_size' 
+                 {$where} AND pm.meta_value != '' 
+                 ORDER BY pm.meta_value" 
+            ),
+            'bolt_patterns' => $wpdb->get_col( 
+                "SELECT DISTINCT pm.meta_value 
+                 FROM {$wpdb->posts} p 
+                 {$joins}
+                 INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = 'hp_bolt_pattern' 
+                 {$where} AND pm.meta_value != '' 
+                 ORDER BY pm.meta_value" 
+            ),
+            'styles' => $wpdb->get_col( 
+                "SELECT DISTINCT pm.meta_value 
+                 FROM {$wpdb->posts} p 
+                 {$joins}
+                 INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id AND pm.meta_key = 'hp_style' 
+                 {$where} AND pm.meta_value != '' 
+                 ORDER BY pm.meta_value" 
+            )
+        );
+
+        wp_send_json_success( $options );
     }
 }

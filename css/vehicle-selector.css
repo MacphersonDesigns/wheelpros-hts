@@ -1,0 +1,163 @@
+/**
+ * Vehicle Selector Styles
+ */
+
+.hp-vehicle-selector {
+	max-width: 100%;
+	padding: 20px;
+	background: #f9f9f9;
+	border-radius: 8px;
+	margin: 20px 0;
+}
+
+.hp-vehicle-selector__row {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+	gap: 15px;
+	margin-bottom: 20px;
+}
+
+.hp-vehicle-selector__field {
+	display: flex;
+	flex-direction: column;
+}
+
+.hp-vehicle-selector__field label {
+	font-weight: 600;
+	margin-bottom: 5px;
+	color: #333;
+	font-size: 14px;
+}
+
+.hp-vehicle-selector__field select {
+	padding: 10px;
+	border: 1px solid #ddd;
+	border-radius: 4px;
+	font-size: 15px;
+	background-color: #fff;
+	transition: all 0.3s ease;
+}
+
+.hp-vehicle-selector__field select:focus {
+	outline: none;
+	border-color: #0073aa;
+	box-shadow: 0 0 0 3px rgba(0, 115, 170, 0.1);
+}
+
+.hp-vehicle-selector__field select:disabled {
+	background-color: #f5f5f5;
+	cursor: not-allowed;
+	opacity: 0.6;
+}
+
+.hp-vehicle-selector__actions {
+	display: flex;
+	gap: 10px;
+	margin-top: 15px;
+}
+
+.hp-vehicle-selector__submit,
+.hp-vehicle-selector__reset {
+	padding: 12px 24px;
+	border: none;
+	border-radius: 4px;
+	font-size: 15px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.3s ease;
+}
+
+.hp-vehicle-selector__submit {
+	background-color: #0073aa;
+	color: #fff;
+	flex: 1;
+}
+
+.hp-vehicle-selector__submit:hover:not(:disabled) {
+	background-color: #005a87;
+}
+
+.hp-vehicle-selector__submit:disabled {
+	background-color: #ccc;
+	cursor: not-allowed;
+}
+
+.hp-vehicle-selector__reset {
+	background-color: #fff;
+	color: #0073aa;
+	border: 2px solid #0073aa;
+}
+
+.hp-vehicle-selector__reset:hover {
+	background-color: #0073aa;
+	color: #fff;
+}
+
+.hp-vehicle-selector__loading {
+	text-align: center;
+	padding: 10px;
+}
+
+.hp-vehicle-selector__loading .spinner {
+	display: inline-block;
+	width: 20px;
+	height: 20px;
+	border: 3px solid rgba(0, 115, 170, 0.3);
+	border-top-color: #0073aa;
+	border-radius: 50%;
+	animation: hp-spinner 0.6s linear infinite;
+}
+
+@keyframes hp-spinner {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.hp-vehicle-specs {
+	margin-top: 20px;
+	padding: 20px;
+	background: #fff;
+	border: 1px solid #ddd;
+	border-radius: 4px;
+}
+
+.hp-vehicle-specs h3 {
+	margin-top: 0;
+	margin-bottom: 15px;
+	font-size: 18px;
+	color: #333;
+}
+
+.hp-vehicle-specs__content dl {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 10px 20px;
+	margin: 0;
+}
+
+.hp-vehicle-specs__content dt {
+	font-weight: 600;
+	color: #555;
+}
+
+.hp-vehicle-specs__content dd {
+	margin: 0;
+	color: #333;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+	.hp-vehicle-selector__row {
+		grid-template-columns: 1fr;
+	}
+
+	.hp-vehicle-selector__actions {
+		flex-direction: column;
+	}
+
+	.hp-vehicle-selector__submit,
+	.hp-vehicle-selector__reset {
+		width: 100%;
+	}
+}
