@@ -414,9 +414,10 @@ class HP_WheelPros_Brand_Manager {
             return;
         }
 
-        // Only filter hp_wheel post type queries
+        // CRITICAL: Only filter hp_wheel post type queries, not all queries!
+        // This prevents breaking Divi pages and other content
         $post_type = $query->get( 'post_type' );
-        if ( $post_type !== 'hp_wheel' && ! is_post_type_archive( 'hp_wheel' ) && ! $query->is_main_query() ) {
+        if ( $post_type !== 'hp_wheel' ) {
             return;
         }
 
@@ -453,9 +454,12 @@ class HP_WheelPros_Brand_Manager {
             return $where;
         }
 
-        // Check if this is an hp_wheel query
+        // CRITICAL: Only filter hp_wheel queries, not all queries!
+        // Check if this is explicitly an hp_wheel query
         $post_type = $query->get( 'post_type' );
-        if ( $post_type !== 'hp_wheel' && ! is_post_type_archive( 'hp_wheel' ) ) {
+        
+        // Only apply if explicitly querying hp_wheel post type
+        if ( $post_type !== 'hp_wheel' ) {
             return $where;
         }
 
