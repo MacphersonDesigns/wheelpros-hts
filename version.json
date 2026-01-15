@@ -1,8 +1,8 @@
 {
 	"name": "Harry's WheelPros Importer",
 	"slug": "harrys-wheelpros-importer",
-	"version": "1.12.1",
-	"download_url": "https://github.com/MacphersonDesigns/wheelpros-hts/releases/download/v1.12.1/harrys-wheelpros-importer-v1.12.1.zip",
+	"version": "1.12.2",
+	"download_url": "https://github.com/MacphersonDesigns/wheelpros-hts/releases/download/v1.12.2/harrys-wheelpros-importer-v1.12.2.zip",
 	"requires": "5.0",
 	"tested": "6.8.2",
 	"requires_php": "7.4",
