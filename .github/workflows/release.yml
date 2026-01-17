@@ -133,27 +133,21 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           VERSION_NUM="${{ steps.version.outputs.version_num }}"
 
-          # Try to fetch version-file branch, create if it doesn't exist
-          git fetch origin version-file 2>/dev/null || echo "version-file branch doesn't exist yet"
-
-          # Create or switch to version-file branch
-          git checkout version-file 2>/dev/null || git checkout --orphan version-file
-
-          # Clean working directory safely - remove tracked files
-          git ls-files | xargs rm -f 2>/dev/null || true
+          # Create a temporary directory for the version file
+          mkdir -p /tmp/version-branch
 
           # Create version.json with extracted version
-          cat <<EOF > version.json
+          cat <<EOF > /tmp/version-branch/version.json
           {
             "name": "Harry's WheelPros Importer",
             "slug": "harrys-wheelpros-importer",
             "version": "${VERSION_NUM}",
             "download_url": "https://github.com/${{ github.repository }}/releases/download/${VERSION}/harrys-wheelpros-importer-${VERSION}.zip",
             "requires": "5.0",
-            "tested": "6.7.1",
+            "tested": "6.8.2",
             "requires_php": "7.4",
-            "author": "Alex Macpherson | Macpherson Designs",
-            "author_homepage": "https://macphersondesigns.com",
+            "author": "Alex Macpherson | Indak Media",
+            "author_homepage": "https://indakmedia.com",
             "sections": {
               "description": "Securely import WheelPros wheel data from CSV/JSON and display it as a custom post type with advanced filtering capabilities.",
               "installation": "1. Download the plugin ZIP file\\n2. Upload via WordPress Admin > Plugins > Add New > Upload Plugin\\n3. Activate the plugin\\n4. Configure SFTP settings in WheelPros Importer > Settings",
@@ -171,21 +165,34 @@ jobs:
           EOF
 
           # Create README for version branch
-          cat <<EOF > README.md
+          cat <<EOF > /tmp/version-branch/README.md
           # Version File Branch
           This branch contains the version.json file used by the Plugin Update Checker.
           It is automatically updated by GitHub Actions when changes are pushed to main.
           EOF
 
-          # Add and commit changes
+          # Create a fresh orphan branch
+          git checkout --orphan version-file-temp
+
+          # Remove all files from the index
+          git rm -rf --cached . > /dev/null 2>&1 || true
+
+          # Remove all files from working directory
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} + 2>/dev/null || true
+
+          # Copy version files
+          cp /tmp/version-branch/version.json .
+          cp /tmp/version-branch/README.md .
+
+          # Add only these two files
           git add version.json README.md
 
-          # Check if there are changes to commit
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Update version.json for v${VERSION}"
-            git push origin version-file
-          fi
+          # Commit
+          git commit -m "Update version.json for ${VERSION}"
+
+          # Force push to version-file branch (overwrites any existing branch)
+          git push origin version-file-temp:version-file --force
+
+          echo "Successfully pushed version.json for ${VERSION} to version-file branch"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
