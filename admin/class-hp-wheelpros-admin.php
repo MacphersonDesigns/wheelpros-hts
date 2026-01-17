@@ -44,6 +44,10 @@ class HP_WheelPros_Admin {
         add_action( 'wp_ajax_hp_download_csv', array( $this, 'ajax_download_csv' ) );
         add_action( 'wp_ajax_hp_process_cached_csv', array( $this, 'ajax_process_cached_csv' ) );
 
+        // Import state management (resume/clear)
+        add_action( 'wp_ajax_hp_save_import_state', array( $this, 'ajax_save_import_state' ) );
+        add_action( 'wp_ajax_hp_clear_import_state', array( $this, 'ajax_clear_import_state' ) );
+
         // Broken image tracking
         add_action( 'wp_ajax_hp_mark_image_broken', array( $this, 'ajax_mark_image_broken' ) );
 
@@ -477,8 +481,54 @@ class HP_WheelPros_Admin {
             <h1><?php esc_html_e( 'Import Wheels', 'wheelpros-importer' ); ?></h1>
             <p><?php esc_html_e( 'Import wheel data from your configured SFTP server or upload a CSV file manually. The two-phase import method is the recommended approach for large datasets.', 'wheelpros-importer' ); ?></p>
 
+            <?php
+            // Check for incomplete/resumable imports
+            $resume_data = get_transient( 'hp_import_resume_state' );
+            $settings_valid = $this->validate_import_settings();
+
+            // Show settings validation warnings
+            if ( ! empty( $settings_valid['errors'] ) ) {
+                echo '<div class="notice notice-error"><p><strong>' . esc_html__( 'Settings Issues:', 'wheelpros-importer' ) . '</strong></p><ul>';
+                foreach ( $settings_valid['errors'] as $error ) {
+                    echo '<li>' . esc_html( $error ) . '</li>';
+                }
+                echo '</ul><p><a href="' . esc_url( admin_url( 'admin.php?page=hp-wheelpros-settings' ) ) . '">' . esc_html__( 'Go to Settings', 'wheelpros-importer' ) . '</a></p></div>';
+            }
+
+            // Show resume option if there's an incomplete import
+            if ( $resume_data && isset( $resume_data['cache_key'] ) && isset( $resume_data['offset'] ) && $resume_data['offset'] > 0 ) {
+                $cache_exists = get_transient( $resume_data['cache_key'] ) || get_transient( $resume_data['cache_key'] . '_meta' );
+                if ( $cache_exists ) {
+                    ?>
+                    <div class="notice notice-warning" id="hp-resume-notice">
+                        <p><strong><?php esc_html_e( 'Incomplete Import Detected', 'wheelpros-importer' ); ?></strong></p>
+                        <p><?php printf(
+                            esc_html__( 'Previous import was interrupted at row %d of %d (%d%% complete). You can resume or start fresh.', 'wheelpros-importer' ),
+                            $resume_data['offset'],
+                            $resume_data['total_rows'],
+                            $resume_data['total_rows'] > 0 ? round( ( $resume_data['offset'] / $resume_data['total_rows'] ) * 100 ) : 0
+                        ); ?></p>
+                        <p>
+                            <button type="button" class="button button-primary" id="hp-resume-import"><?php esc_html_e( 'Resume Import', 'wheelpros-importer' ); ?></button>
+                            <button type="button" class="button" id="hp-discard-resume"><?php esc_html_e( 'Start Fresh', 'wheelpros-importer' ); ?></button>
+                        </p>
+                    </div>
+                    <?php
+                }
+            }
+            ?>
+
             <h2><?php esc_html_e( 'SFTP Import (Recommended)', 'wheelpros-importer' ); ?></h2>
             <p><?php esc_html_e( 'Download and cache the CSV file first, then process it in small batches. This method is reliable and avoids timeout issues with large files.', 'wheelpros-importer' ); ?></p>
+
+            <div style="margin-bottom: 15px; padding: 10px; background: #f9f9f9; border: 1px solid #ddd;">
+                <label style="display: inline-flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="hp-skip-image-validation" checked />
+                    <strong><?php esc_html_e( 'Skip image validation during import (faster)', 'wheelpros-importer' ); ?></strong>
+                </label>
+                <p class="description" style="margin: 5px 0 0 26px;"><?php esc_html_e( 'Uncheck to validate images during import. This is slower but filters out items without working images. You can also validate images separately after import.', 'wheelpros-importer' ); ?></p>
+            </div>
+
             <button id="hp-download-csv" class="button button-primary"><?php esc_html_e( 'Step 1: Download CSV File', 'wheelpros-importer' ); ?></button>
             <button id="hp-process-csv" class="button button-secondary" disabled><?php esc_html_e( 'Step 2: Process Data', 'wheelpros-importer' ); ?></button>
 
@@ -499,6 +549,61 @@ class HP_WheelPros_Admin {
             (function($){
                 var cacheKey = '';
                 var totalRows = 0;
+                var currentOffset = 0;
+                var totalImported = 0;
+                var totalUpdated = 0;
+                var totalSkipped = 0;
+                var importRunning = false;
+                var retryCount = 0;
+                var maxRetries = 3;
+
+                <?php
+                // Pass resume data to JavaScript if available
+                if ( $resume_data && isset( $resume_data['cache_key'] ) ) {
+                    echo 'var resumeData = ' . json_encode( $resume_data ) . ';';
+                } else {
+                    echo 'var resumeData = null;';
+                }
+                ?>
+
+                // Resume import handler
+                $('#hp-resume-import').on('click', function(e){
+                    e.preventDefault();
+                    if (!resumeData) return;
+
+                    cacheKey = resumeData.cache_key;
+                    totalRows = resumeData.total_rows;
+                    currentOffset = resumeData.offset;
+                    totalImported = resumeData.imported || 0;
+                    totalUpdated = resumeData.updated || 0;
+                    totalSkipped = resumeData.skipped || 0;
+
+                    $('#hp-resume-notice').hide();
+                    $('#hp-import-progress').show();
+                    $('#hp-progress-bar').css('width', ((currentOffset / totalRows) * 100) + '%');
+                    $('#hp-progress-text').text('<?php echo esc_js( __( 'Resuming import...', 'wheelpros-importer' ) ); ?>');
+                    $('#hp-import-log').text('🔄 Resuming from row ' + currentOffset + '...\n');
+
+                    $('#hp-download-csv').prop('disabled', true);
+                    $('#hp-process-csv').prop('disabled', true);
+
+                    startProcessing();
+                });
+
+                // Discard resume handler
+                $('#hp-discard-resume').on('click', function(e){
+                    e.preventDefault();
+                    if (!confirm('<?php echo esc_js( __( 'Are you sure? This will clear the cached data and you will need to download again.', 'wheelpros-importer' ) ); ?>')) {
+                        return;
+                    }
+
+                    $.post(ajaxurl, {
+                        action: 'hp_clear_import_state'
+                    }, function(){
+                        $('#hp-resume-notice').hide();
+                        resumeData = null;
+                    });
+                });
 
                 // Download CSV file
                 $('#hp-download-csv').on('click', function(e){
@@ -510,6 +615,12 @@ class HP_WheelPros_Admin {
                     $('#hp-progress-bar').css('width', '0%');
                     $('#hp-progress-text').text('<?php echo esc_js( __( 'Downloading CSV file from SFTP server...', 'wheelpros-importer' ) ); ?>');
                     $('#hp-import-log').text('Starting download...\n');
+
+                    // Reset state
+                    currentOffset = 0;
+                    totalImported = 0;
+                    totalUpdated = 0;
+                    totalSkipped = 0;
 
                     $.post(ajaxurl, {
                         action: 'hp_download_csv'
@@ -547,68 +658,122 @@ class HP_WheelPros_Admin {
                         return;
                     }
 
-                    var $btn = $(this);
-                    $btn.prop('disabled', true);
+                    $('#hp-process-csv').prop('disabled', true);
                     $('#hp-download-csv').prop('disabled', true);
                     $('#hp-progress-bar').css('width', '0%');
                     $('#hp-progress-text').text('<?php echo esc_js( __( 'Processing data...', 'wheelpros-importer' ) ); ?>');
                     $('#hp-import-log').append('🔄 Starting data processing...\n');
 
-                    var offset = 0;
-                    var totalImported = 0;
-                    var totalUpdated = 0;
-
-                    function processBatch(){
-                        $.post(ajaxurl, {
-                            action: 'hp_process_cached_csv',
-                            cache_key: cacheKey,
-                            offset: offset
-                        }, function(resp){
-                            if (resp.success) {
-                                offset = resp.data.offset;
-                                totalImported += resp.data.imported;
-                                totalUpdated += resp.data.updated;
-
-                                var progress = resp.data.progress;
-                                $('#hp-progress-bar').css('width', progress + '%');
-                                $('#hp-progress-text').text(progress + '% complete (' + offset + '/' + totalRows + ' rows)');
-
-                                // Add log messages
-                                if (resp.data.log && Array.isArray(resp.data.log)) {
-                                    resp.data.log.forEach(function(msg){
-                                        $('#hp-import-log').append(msg + '\n');
-                                    });
-                                    var logEl = document.getElementById('hp-import-log');
-                                    logEl.scrollTop = logEl.scrollHeight;
-                                }
-
-                                if (resp.data.done) {
-                                    $('#hp-progress-text').text('✅ Import completed! Imported: ' + totalImported + ', Updated: ' + totalUpdated);
-                                    $('#hp-import-log').append('\n🎉 Import finished successfully!\n');
-                                    $('#hp-import-log').append('📈 Total imported: ' + totalImported + '\n');
-                                    $('#hp-import-log').append('🔄 Total updated: ' + totalUpdated + '\n');
-                                    $btn.prop('disabled', false);
-                                    $('#hp-download-csv').prop('disabled', false);
-                                } else {
-                                    // Continue with next batch
-                                    setTimeout(processBatch, 100);
-                                }
-                            } else {
-                                $('#hp-progress-text').text('❌ Processing failed: ' + resp.data);
-                                $('#hp-import-log').append('❌ Processing error: ' + resp.data + '\n');
-                                $btn.prop('disabled', false);
-                                $('#hp-download-csv').prop('disabled', false);
-                            }
-                        }, 'json').fail(function(xhr, status, error){
-                            $('#hp-progress-text').text('❌ Network error occurred');
-                            $('#hp-import-log').append('❌ Network error: ' + error + '\n');
-                            $btn.prop('disabled', false);
-                            $('#hp-download-csv').prop('disabled', false);
-                        });
-                    }
-
-                    processBatch();
+                    startProcessing();
                 });
+
+                function startProcessing() {
+                    importRunning = true;
+                    retryCount = 0;
+                    processBatch();
+                }
+
+                function processBatch(){
+                    if (!importRunning) return;
+
+                    var skipImageValidation = $('#hp-skip-image-validation').is(':checked') ? 1 : 0;
+
+                    $.post(ajaxurl, {
+                        action: 'hp_process_cached_csv',
+                        cache_key: cacheKey,
+                        offset: currentOffset,
+                        skip_image_validation: skipImageValidation
+                    }, function(resp){
+                        retryCount = 0; // Reset retry count on success
+
+                        if (resp.success) {
+                            currentOffset = resp.data.offset;
+                            totalImported += resp.data.imported;
+                            totalUpdated += resp.data.updated;
+                            totalSkipped += resp.data.skipped || 0;
+
+                            var progress = resp.data.progress;
+                            $('#hp-progress-bar').css('width', progress + '%');
+                            $('#hp-progress-text').text(progress + '% complete (' + currentOffset + '/' + totalRows + ' rows)');
+
+                            // Add log messages
+                            if (resp.data.log && Array.isArray(resp.data.log)) {
+                                resp.data.log.forEach(function(msg){
+                                    $('#hp-import-log').append(msg + '\n');
+                                });
+                                var logEl = document.getElementById('hp-import-log');
+                                logEl.scrollTop = logEl.scrollHeight;
+                            }
+
+                            if (resp.data.done) {
+                                importRunning = false;
+                                var completeMsg = '✅ Import completed! Imported: ' + totalImported + ', Updated: ' + totalUpdated;
+                                if (totalSkipped > 0) {
+                                    completeMsg += ', Skipped: ' + totalSkipped;
+                                }
+                                $('#hp-progress-text').text(completeMsg);
+                                $('#hp-import-log').append('\n🎉 Import finished successfully!\n');
+                                $('#hp-import-log').append('📈 Total imported: ' + totalImported + '\n');
+                                $('#hp-import-log').append('🔄 Total updated: ' + totalUpdated + '\n');
+                                if (totalSkipped > 0) {
+                                    $('#hp-import-log').append('⏭️ Total skipped: ' + totalSkipped + '\n');
+                                }
+                                $('#hp-process-csv').prop('disabled', false);
+                                $('#hp-download-csv').prop('disabled', false);
+                            } else {
+                                // Continue with next batch
+                                setTimeout(processBatch, 100);
+                            }
+                        } else {
+                            handleProcessError(resp.data);
+                        }
+                    }, 'json').fail(function(xhr, status, error){
+                        handleNetworkError(error);
+                    });
+                }
+
+                function handleProcessError(errorMsg) {
+                    $('#hp-progress-text').text('❌ Processing failed: ' + errorMsg);
+                    $('#hp-import-log').append('❌ Processing error: ' + errorMsg + '\n');
+                    importRunning = false;
+                    enableButtons();
+                }
+
+                function handleNetworkError(error) {
+                    retryCount++;
+                    $('#hp-import-log').append('⚠️ Network error (attempt ' + retryCount + '/' + maxRetries + '): ' + error + '\n');
+
+                    if (retryCount < maxRetries) {
+                        // Save state and retry after delay
+                        $('#hp-progress-text').text('⚠️ Network error, retrying in 5 seconds... (attempt ' + retryCount + '/' + maxRetries + ')');
+                        saveImportState();
+                        setTimeout(processBatch, 5000);
+                    } else {
+                        $('#hp-progress-text').text('❌ Network error after ' + maxRetries + ' attempts. Progress saved - refresh to resume.');
+                        $('#hp-import-log').append('❌ Max retries reached. Your progress has been saved.\n');
+                        $('#hp-import-log').append('💾 Refresh the page to see the resume option.\n');
+                        importRunning = false;
+                        saveImportState();
+                        enableButtons();
+                    }
+                }
+
+                function saveImportState() {
+                    $.post(ajaxurl, {
+                        action: 'hp_save_import_state',
+                        cache_key: cacheKey,
+                        offset: currentOffset,
+                        total_rows: totalRows,
+                        imported: totalImported,
+                        updated: totalUpdated,
+                        skipped: totalSkipped
+                    });
+                }
+
+                function enableButtons() {
+                    $('#hp-process-csv').prop('disabled', false);
+                    $('#hp-download-csv').prop('disabled', false);
+                }
             })(jQuery);
             </script>
 
@@ -821,6 +986,34 @@ class HP_WheelPros_Admin {
             </form>
         </div>
         <?php
+    }
+
+    /**
+     * Validate import settings and return any issues.
+     *
+     * @return array Array with 'valid' boolean and 'errors' array
+     */
+    protected function validate_import_settings() {
+        $errors = array();
+        $opts = get_option( 'hp_wheelpros_options' );
+
+        if ( empty( $opts['host'] ) ) {
+            $errors[] = __( 'SFTP Host is not configured', 'wheelpros-importer' );
+        }
+        if ( empty( $opts['username'] ) ) {
+            $errors[] = __( 'SFTP Username is not configured', 'wheelpros-importer' );
+        }
+        if ( empty( $opts['password'] ) ) {
+            $errors[] = __( 'SFTP Password is not configured', 'wheelpros-importer' );
+        }
+        if ( empty( $opts['path'] ) ) {
+            $errors[] = __( 'Remote file path is not configured', 'wheelpros-importer' );
+        }
+
+        return array(
+            'valid' => empty( $errors ),
+            'errors' => $errors,
+        );
     }
 
     /**
@@ -1115,7 +1308,8 @@ class HP_WheelPros_Admin {
             // Get parameters
             $cache_key = isset( $_REQUEST['cache_key'] ) ? sanitize_key( wp_unslash( $_REQUEST['cache_key'] ) ) : '';
             $offset = isset( $_REQUEST['offset'] ) ? absint( $_REQUEST['offset'] ) : 0;
-            $batch_size = 25; // Even smaller batch size for memory safety
+            $skip_image_validation = isset( $_REQUEST['skip_image_validation'] ) && $_REQUEST['skip_image_validation'] == '1';
+            $batch_size = 50; // Larger batch size for better performance (was 25)
 
             // Set memory and time limits for this request
             ini_set( 'memory_limit', '512M' );
@@ -1230,7 +1424,13 @@ class HP_WheelPros_Admin {
 
             $imported = 0;
             $updated = 0;
+            $skipped = 0;
             $log_messages = array();
+
+            // Log if image validation is being skipped
+            if ( $offset === 0 && $skip_image_validation ) {
+                $log_messages[] = '⚡ Image validation skipped for faster import';
+            }
 
             // Build existing part number map for this batch only (more memory efficient)
             $existing_map = array();
@@ -1310,7 +1510,17 @@ class HP_WheelPros_Admin {
                 $brand = isset( $item['Brand'] ) ? trim( $item['Brand'] ) : '';
                 if ( ! empty( $brand ) && class_exists( 'HP_WheelPros_Brand_Manager' ) ) {
                     if ( ! HP_WheelPros_Brand_Manager::should_import_brand( $brand ) ) {
-                        continue; // Skip hidden brands silently
+                        $skipped++;
+                        continue; // Skip hidden brands
+                    }
+                }
+
+                // Validate image URL if not skipping validation
+                if ( ! $skip_image_validation ) {
+                    $image_url = isset( $item['ImageURL'] ) ? trim( $item['ImageURL'] ) : '';
+                    if ( empty( $image_url ) || ! $this->validate_image_url_quick( $image_url ) ) {
+                        $skipped++;
+                        continue; // Skip items with invalid/missing images
                     }
                 }
 
@@ -1416,6 +1626,7 @@ class HP_WheelPros_Admin {
                 // Clean up cache - handle both single and chunked formats
                 delete_transient( $cache_key );
                 delete_transient( $cache_key . '_existing' );
+                delete_transient( 'hp_import_resume_state' ); // Clear resume state on success
 
                 // Clean up chunked cache if it exists
                 $metadata = get_transient( $cache_key . '_meta' );
@@ -1429,8 +1640,21 @@ class HP_WheelPros_Admin {
                     error_log( 'HP CSV Process: Cleaned up single cache transient' );
                 }
 
-                $log_messages[] = '✅ Import completed! Imported: ' . $imported . ', Updated: ' . $updated;
-                error_log( 'HP CSV Process: Import completed - Imported: ' . $imported . ', Updated: ' . $updated );
+                $completion_msg = '✅ Import completed! Imported: ' . $imported . ', Updated: ' . $updated;
+                if ( $skipped > 0 ) {
+                    $completion_msg .= ', Skipped: ' . $skipped;
+                }
+                $log_messages[] = $completion_msg;
+                error_log( 'HP CSV Process: Import completed - Imported: ' . $imported . ', Updated: ' . $updated . ', Skipped: ' . $skipped );
+            } else {
+                // Save progress state for resume capability (every batch)
+                $state = array(
+                    'cache_key'  => $cache_key,
+                    'offset'     => $actual_end,
+                    'total_rows' => $total_rows,
+                    'saved_at'   => current_time( 'mysql' ),
+                );
+                set_transient( 'hp_import_resume_state', $state, 6 * HOUR_IN_SECONDS );
             }
 
             wp_send_json_success( array(
@@ -1439,6 +1663,7 @@ class HP_WheelPros_Admin {
                 'done' => $done,
                 'imported' => $imported,
                 'updated' => $updated,
+                'skipped' => $skipped,
                 'log' => $log_messages,
                 'cache_key' => $cache_key,
             ) );
@@ -1536,6 +1761,283 @@ class HP_WheelPros_Admin {
     }
 
     /**
+     * Robust image URL validation that returns validity and reason.
+     * Used by the image validation scanner for detailed logging.
+     *
+     * @param string $url Image URL to validate.
+     * @return array ['valid' => bool, 'reason' => string]
+     */
+    protected function validate_image_url_robust( $url ) {
+        // Quick validation
+        if ( empty( $url ) ) {
+            return array( 'valid' => false, 'reason' => 'No image URL' );
+        }
+
+        // Basic URL format check
+        if ( ! filter_var( $url, FILTER_VALIDATE_URL ) ) {
+            return array( 'valid' => false, 'reason' => 'Invalid URL format' );
+        }
+
+        // Skip known placeholder patterns
+        $skip_patterns = array( 'placeholder', 'no-image', 'noimage', 'default.', 'blank.', 'example.com', 'localhost' );
+        foreach ( $skip_patterns as $pattern ) {
+            if ( stripos( $url, $pattern ) !== false ) {
+                return array( 'valid' => false, 'reason' => 'Placeholder URL pattern detected' );
+            }
+        }
+
+        // Check cache first
+        $cache_key = 'hp_img_robust_' . md5( $url );
+        $cached = get_transient( $cache_key );
+        if ( $cached !== false && is_array( $cached ) ) {
+            return $cached;
+        }
+
+        $result = array( 'valid' => false, 'reason' => 'Unknown error' );
+
+        // Try HEAD request first (faster)
+        $response = wp_remote_head( $url, array(
+            'timeout'     => 10,
+            'redirection' => 5,
+            'user-agent'  => 'Mozilla/5.0 (compatible; WheelPros-Importer/1.0)',
+        ) );
+
+        if ( ! is_wp_error( $response ) ) {
+            $status_code = wp_remote_retrieve_response_code( $response );
+            $content_type = wp_remote_retrieve_header( $response, 'content-type' );
+
+            // Accept 200, 301, 302
+            if ( in_array( $status_code, array( 200, 301, 302, 304 ) ) ) {
+                // Be lenient with content-type
+                if ( empty( $content_type ) || strpos( $content_type, 'image/' ) === 0 || strpos( $content_type, 'application/octet-stream' ) !== false ) {
+                    $result = array( 'valid' => true, 'reason' => 'HEAD request OK' );
+                } else {
+                    // Wrong content-type, but try GET anyway
+                    $result = array( 'valid' => false, 'reason' => 'Content-Type: ' . $content_type );
+                }
+            } else {
+                $result = array( 'valid' => false, 'reason' => 'HTTP ' . $status_code );
+            }
+        } else {
+            $result = array( 'valid' => false, 'reason' => 'HEAD failed: ' . $response->get_error_message() );
+        }
+
+        // If HEAD failed or returned questionable result, try GET with range
+        if ( ! $result['valid'] ) {
+            $response = wp_remote_get( $url, array(
+                'timeout'     => 10,
+                'redirection' => 5,
+                'user-agent'  => 'Mozilla/5.0 (compatible; WheelPros-Importer/1.0)',
+                'headers'     => array( 'Range' => 'bytes=0-1023' ),
+            ) );
+
+            if ( ! is_wp_error( $response ) ) {
+                $status_code = wp_remote_retrieve_response_code( $response );
+                $body = wp_remote_retrieve_body( $response );
+
+                if ( in_array( $status_code, array( 200, 206 ) ) && ! empty( $body ) ) {
+                    // Check for image magic bytes
+                    $magic_bytes = array(
+                        "\xFF\xD8\xFF"         => 'JPEG',
+                        "\x89PNG"              => 'PNG',
+                        "GIF87a"               => 'GIF',
+                        "GIF89a"               => 'GIF',
+                        "RIFF"                 => 'WebP',
+                        "<svg"                 => 'SVG',
+                    );
+
+                    foreach ( $magic_bytes as $magic => $type ) {
+                        if ( substr( $body, 0, strlen( $magic ) ) === $magic ) {
+                            $result = array( 'valid' => true, 'reason' => 'Valid ' . $type . ' image' );
+                            break;
+                        }
+                    }
+
+                    // If no magic bytes matched but we got content, it might still be valid
+                    if ( ! $result['valid'] && strlen( $body ) > 100 ) {
+                        // Check if it looks like binary data (not HTML/text)
+                        $text_chars = count_chars( substr( $body, 0, 100 ), 1 );
+                        $printable = 0;
+                        foreach ( $text_chars as $char => $count ) {
+                            if ( ( $char >= 32 && $char <= 126 ) || in_array( $char, array( 9, 10, 13 ) ) ) {
+                                $printable += $count;
+                            }
+                        }
+                        // If less than 70% printable, likely binary/image
+                        if ( $printable < 70 ) {
+                            $result = array( 'valid' => true, 'reason' => 'Binary content detected' );
+                        } else {
+                            $result = array( 'valid' => false, 'reason' => 'Not an image (text content)' );
+                        }
+                    }
+                } elseif ( $status_code === 404 ) {
+                    $result = array( 'valid' => false, 'reason' => 'Image not found (404)' );
+                } elseif ( $status_code === 403 ) {
+                    // Some servers block range requests, try full GET
+                    $result = array( 'valid' => false, 'reason' => 'Access denied (403)' );
+                }
+            }
+        }
+
+        // Cache result for 4 hours
+        set_transient( $cache_key, $result, 4 * HOUR_IN_SECONDS );
+
+        return $result;
+    }
+
+    /**
+     * Quick image URL validation with caching.
+     * Uses HEAD request first, falls back to GET if HEAD fails.
+     * More lenient and robust than the importer's validate_image_url().
+     *
+     * @param string $url Image URL to validate.
+     * @return bool True if image appears valid.
+     */
+    protected function validate_image_url_quick( $url ) {
+        // Quick validation
+        if ( empty( $url ) ) {
+            return false;
+        }
+
+        // Basic URL format check
+        if ( ! filter_var( $url, FILTER_VALIDATE_URL ) ) {
+            return false;
+        }
+
+        // Skip known placeholder patterns
+        $skip_patterns = array( 'placeholder', 'no-image', 'noimage', 'default.', 'blank.' );
+        foreach ( $skip_patterns as $pattern ) {
+            if ( stripos( $url, $pattern ) !== false ) {
+                return false;
+            }
+        }
+
+        // Check cache first
+        $cache_key = 'hp_img_' . md5( $url );
+        $cached = get_transient( $cache_key );
+        if ( $cached !== false ) {
+            return $cached === 'valid';
+        }
+
+        // Try HEAD request first (faster)
+        $response = wp_remote_head( $url, array(
+            'timeout'     => 8,
+            'redirection' => 5,
+            'user-agent'  => 'Mozilla/5.0 (compatible; WheelPros-Importer/1.0)',
+        ) );
+
+        $is_valid = false;
+
+        if ( ! is_wp_error( $response ) ) {
+            $status_code = wp_remote_retrieve_response_code( $response );
+            $content_type = wp_remote_retrieve_header( $response, 'content-type' );
+
+            // Accept 200, 301, 302 (redirects often work for images)
+            if ( in_array( $status_code, array( 200, 301, 302 ) ) ) {
+                // Be lenient with content-type - some servers return wrong types
+                if ( empty( $content_type ) || strpos( $content_type, 'image/' ) === 0 || strpos( $content_type, 'application/octet-stream' ) !== false ) {
+                    $is_valid = true;
+                }
+            }
+        }
+
+        // If HEAD failed or returned error, try GET with range (downloads only first bytes)
+        if ( ! $is_valid ) {
+            $response = wp_remote_get( $url, array(
+                'timeout'     => 8,
+                'redirection' => 5,
+                'user-agent'  => 'Mozilla/5.0 (compatible; WheelPros-Importer/1.0)',
+                'headers'     => array( 'Range' => 'bytes=0-1023' ), // Only get first 1KB
+            ) );
+
+            if ( ! is_wp_error( $response ) ) {
+                $status_code = wp_remote_retrieve_response_code( $response );
+                $body = wp_remote_retrieve_body( $response );
+
+                // Accept 200, 206 (partial content)
+                if ( in_array( $status_code, array( 200, 206 ) ) && ! empty( $body ) ) {
+                    // Check for image magic bytes
+                    $magic_bytes = array(
+                        "\xFF\xD8\xFF"         => 'jpeg',
+                        "\x89PNG"              => 'png',
+                        "GIF87a"               => 'gif',
+                        "GIF89a"               => 'gif',
+                        "RIFF"                 => 'webp', // WebP starts with RIFF
+                    );
+
+                    foreach ( $magic_bytes as $magic => $type ) {
+                        if ( substr( $body, 0, strlen( $magic ) ) === $magic ) {
+                            $is_valid = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Cache result for 2 hours
+        set_transient( $cache_key, $is_valid ? 'valid' : 'invalid', 2 * HOUR_IN_SECONDS );
+
+        return $is_valid;
+    }
+
+    /**
+     * AJAX handler to save import state for resume functionality.
+     */
+    public function ajax_save_import_state() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( 'Permission denied' );
+        }
+
+        $state = array(
+            'cache_key'  => isset( $_POST['cache_key'] ) ? sanitize_key( $_POST['cache_key'] ) : '',
+            'offset'     => isset( $_POST['offset'] ) ? absint( $_POST['offset'] ) : 0,
+            'total_rows' => isset( $_POST['total_rows'] ) ? absint( $_POST['total_rows'] ) : 0,
+            'imported'   => isset( $_POST['imported'] ) ? absint( $_POST['imported'] ) : 0,
+            'updated'    => isset( $_POST['updated'] ) ? absint( $_POST['updated'] ) : 0,
+            'skipped'    => isset( $_POST['skipped'] ) ? absint( $_POST['skipped'] ) : 0,
+            'saved_at'   => current_time( 'mysql' ),
+        );
+
+        // Save state for 6 hours (same as cache expiry)
+        set_transient( 'hp_import_resume_state', $state, 6 * HOUR_IN_SECONDS );
+
+        wp_send_json_success( array( 'message' => 'Import state saved' ) );
+    }
+
+    /**
+     * AJAX handler to clear import state (discard resume).
+     */
+    public function ajax_clear_import_state() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( 'Permission denied' );
+        }
+
+        // Get current state to clean up cache too
+        $state = get_transient( 'hp_import_resume_state' );
+        if ( $state && isset( $state['cache_key'] ) ) {
+            $cache_key = $state['cache_key'];
+
+            // Delete all related transients
+            delete_transient( $cache_key );
+            delete_transient( $cache_key . '_existing' );
+            delete_transient( $cache_key . '_meta' );
+
+            // Clean up chunks if they exist
+            $metadata = get_transient( $cache_key . '_meta' );
+            if ( $metadata && isset( $metadata['total_chunks'] ) ) {
+                for ( $i = 0; $i < $metadata['total_chunks']; $i++ ) {
+                    delete_transient( $cache_key . '_chunk_' . $i );
+                }
+            }
+        }
+
+        delete_transient( 'hp_import_resume_state' );
+
+        wp_send_json_success( array( 'message' => 'Import state cleared' ) );
+    }
+
+    /**
      * AJAX handler to mark an image URL as broken.
      */
     public function ajax_mark_image_broken() {
@@ -1574,6 +2076,7 @@ class HP_WheelPros_Admin {
     /**
      * AJAX handler to validate wheel images in batches.
      * Checks if images are valid and marks wheels with invalid images as draft.
+     * Uses robust validation with HEAD + GET fallback and magic byte detection.
      */
     public function ajax_validate_wheel_images() {
         // Verify nonce
@@ -1581,18 +2084,16 @@ class HP_WheelPros_Admin {
             wp_send_json_error( 'Invalid nonce' );
         }
 
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( 'Permission denied' );
+        }
+
         $offset = isset( $_POST['offset'] ) ? absint( $_POST['offset'] ) : 0;
         $batch_size = isset( $_POST['batch_size'] ) ? absint( $_POST['batch_size'] ) : 25;
 
-        // Get total count
-        $args = array(
-            'post_type'      => 'hp_wheel',
-            'post_status'    => 'publish',
-            'posts_per_page' => -1,
-            'fields'         => 'ids',
-        );
-        $all_ids = get_posts( $args );
-        $total = count( $all_ids );
+        // Get total count using efficient query
+        global $wpdb;
+        $total = $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'hp_wheel' AND post_status = 'publish'" );
 
         // Get batch of posts
         $batch_args = array(
@@ -1612,44 +2113,10 @@ class HP_WheelPros_Admin {
             $image_url = get_post_meta( $post->ID, 'hp_image_url', true );
             $part_number = get_post_meta( $post->ID, 'hp_part_number', true );
 
-            // Check if image URL is empty or invalid
-            $is_invalid = false;
-            $reason = '';
-
-            if ( empty( $image_url ) ) {
-                $is_invalid = true;
-                $reason = 'No image URL';
-            } elseif ( ! filter_var( $image_url, FILTER_VALIDATE_URL ) ) {
-                $is_invalid = true;
-                $reason = 'Invalid URL format';
-            } elseif ( strpos( $image_url, 'localhost' ) !== false ||
-                       strpos( $image_url, 'placeholder' ) !== false ||
-                       strpos( $image_url, 'example.com' ) !== false ) {
-                $is_invalid = true;
-                $reason = 'Placeholder URL';
-            } else {
-                // Check if URL is accessible (HEAD request)
-                $response = wp_remote_head( $image_url, array(
-                    'timeout'     => 5,
-                    'redirection' => 3,
-                ) );
-
-                if ( is_wp_error( $response ) ) {
-                    $is_invalid = true;
-                    $reason = 'Network error: ' . $response->get_error_message();
-                } else {
-                    $status_code = wp_remote_retrieve_response_code( $response );
-                    $content_type = wp_remote_retrieve_header( $response, 'content-type' );
-
-                    if ( $status_code !== 200 ) {
-                        $is_invalid = true;
-                        $reason = 'HTTP ' . $status_code;
-                    } elseif ( strpos( $content_type, 'image/' ) !== 0 ) {
-                        $is_invalid = true;
-                        $reason = 'Not an image (Content-Type: ' . $content_type . ')';
-                    }
-                }
-            }
+            // Use the robust validation method
+            $is_valid = $this->validate_image_url_robust( $image_url );
+            $is_invalid = ! $is_valid['valid'];
+            $reason = $is_valid['reason'];
 
             if ( $is_invalid ) {
                 // Convert to draft
