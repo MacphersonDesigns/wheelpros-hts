@@ -1,0 +1,24 @@
+{
+  "name": "Harry's WheelPros Importer",
+  "slug": "harrys-wheelpros-importer",
+  "version": "1.13.2",
+  "download_url": "https://github.com/MacphersonDesigns/wheelpros-hts/releases/download/v1.13.2/harrys-wheelpros-importer-v1.13.2.zip",
+  "requires": "5.0",
+  "tested": "6.8.2",
+  "requires_php": "7.4",
+  "author": "Alex Macpherson | Indak Media",
+  "author_homepage": "https://indakmedia.com",
+  "sections": {
+    "description": "Securely import WheelPros wheel data from CSV/JSON and display it as a custom post type with advanced filtering capabilities.",
+    "installation": "1. Download the plugin ZIP file\n2. Upload via WordPress Admin > Plugins > Add New > Upload Plugin\n3. Activate the plugin\n4. Configure SFTP settings in WheelPros Importer > Settings",
+    "changelog": "See release notes at https://github.com/MacphersonDesigns/wheelpros-hts/releases"
+  },
+  "banners": {
+    "low": "",
+    "high": ""
+  },
+  "icons": {
+    "1x": "",
+    "2x": ""
+  }
+}
